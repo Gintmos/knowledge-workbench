@@ -329,9 +329,10 @@ test("P6 08 · manifest 字段齐备，双端标志与最低版本正确", () =>
   assert.equal(manifest.id, "knowledge-workbench");
   assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
   assert.ok(!/obsidian/i.test(manifest.name), "插件名不得含 Obsidian 字样");
-  // 官方新目录自动审核：name 若等于其大写形式会被判「全大写」而拒收。
-  // 纯中文名没有大小写，toUpperCase() 等于自身，必须含至少一个 ASCII 小写字母。
-  assert.ok(/[a-z]/.test(manifest.name), "插件名须含至少一个小写字母（避免被判全大写而拒收）");
+  // 官方 Manifest 文档 https://docs.obsidian.md/Reference/Manifest#name：
+  // name 仅用 Basic Latin 字符，标点只允许 - + ()，禁止 emoji / 特殊字符 / 非拉丁文字。
+  // 1.0.3 因含中文与中间点 · 被目录以 "This name is not allowed in the directory" 拒绝。
+  assert.ok(/^[A-Za-z][A-Za-z0-9 +()-]*$/.test(manifest.name), "插件名须仅用 Basic Latin 字符，标点限 - + ()，无特殊字符");
   assert.ok(!/plugin$/i.test(manifest.name), "插件名不得以 Plugin 结尾");
   assert.ok(!/^obs?i/i.test(manifest.name), "插件名不得以 Obsi 开头");
   assert.ok(!/dian$/i.test(manifest.name), "插件名不得以 dian 结尾");

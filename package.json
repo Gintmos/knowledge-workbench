@@ -1,6 +1,6 @@
 {
   "name": "knowledge-workbench",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "Obsidian plugin: vault-local knowledge classification, tasks, review plan and note reading. No backend, no network requests.",
   "scripts": {

@@ -1,7 +1,7 @@
 {
   "id": "knowledge-workbench",
-  "name": "Knowledge Workbench · 知识管理工作台",
-  "version": "1.0.3",
+  "name": "Knowledge Workbench",
+  "version": "1.0.4",
   "minAppVersion": "1.5.0",
   "description": "Organize notes by tags, track due and review tasks, and open or read notes in your vault. All data stays local with zero network requests.",
   "author": "Gintmos",

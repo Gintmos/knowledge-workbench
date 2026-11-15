@@ -194,7 +194,9 @@ check("清单", "package.json version 与 manifest 一致", pkg.version === mani
 check("清单", "插件 id 与 package name 一致", pkg.name === manifest.id, `${pkg.name} / ${manifest.id}`);
 check("清单", "isDesktopOnly 为 false（双端）", manifest.isDesktopOnly === false, String(manifest.isDesktopOnly));
 check("清单", "插件名不含 Obsidian 字样（官方提交规范）", !/obsidian/i.test(manifest.name ?? ""), String(manifest.name));
-check("清单", "插件名含小写字母（避免纯中文被判全大写而拒收）", /[a-z]/.test(manifest.name ?? ""), String(manifest.name));
+// 官方 Manifest 文档 https://docs.obsidian.md/Reference/Manifest#name：
+// name 仅用 Basic Latin 字符，标点只允许 - + ()，禁止 emoji / 特殊字符 / 非拉丁文字。
+check("清单", "插件名仅用 Basic Latin 且标点限 - + ()（官方命名规范）", /^[A-Za-z][A-Za-z0-9 +\-()]*$/.test(manifest.name ?? ""), String(manifest.name));
 check("清单", "插件名不以 Plugin 结尾 / Obsi 开头 / dian 结尾", !/plugin$/i.test(manifest.name ?? "") && !/^obs?i/i.test(manifest.name ?? "") && !/dian$/i.test(manifest.name ?? ""), String(manifest.name));
 check("清单", "描述以英文标点结尾且不含 Obsidian / 不超 250 字符", /[.!?)\]]$/.test(manifest.description ?? "") && !/obsidian/i.test(manifest.description ?? "") && (manifest.description ?? "").length <= 250, String(manifest.description).slice(-40));
 const minParts = String(manifest.minAppVersion ?? "0.0.0").split(".").map(Number);
