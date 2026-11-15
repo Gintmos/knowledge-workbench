@@ -329,6 +329,15 @@ test("P6 08 · manifest 字段齐备，双端标志与最低版本正确", () =>
   assert.equal(manifest.id, "knowledge-workbench");
   assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
   assert.ok(!/obsidian/i.test(manifest.name), "插件名不得含 Obsidian 字样");
+  // 官方新目录自动审核：name 若等于其大写形式会被判「全大写」而拒收。
+  // 纯中文名没有大小写，toUpperCase() 等于自身，必须含至少一个 ASCII 小写字母。
+  assert.ok(/[a-z]/.test(manifest.name), "插件名须含至少一个小写字母（避免被判全大写而拒收）");
+  assert.ok(!/plugin$/i.test(manifest.name), "插件名不得以 Plugin 结尾");
+  assert.ok(!/^obs?i/i.test(manifest.name), "插件名不得以 Obsi 开头");
+  assert.ok(!/dian$/i.test(manifest.name), "插件名不得以 dian 结尾");
+  assert.ok(/[.!?)\]]$/.test(manifest.description), "描述须以英文标点 . ! ? ( ) ] 结尾");
+  assert.ok(!/obsidian/i.test(manifest.description), "描述不得含 Obsidian 字样");
+  assert.ok(manifest.description.length <= 250, "描述不超过 250 字符");
   const [major, minor, patch] = manifest.minAppVersion.split(".").map(Number);
   assert.ok(major > 1 || (major === 1 && (minor > 4 || (minor === 4 && patch >= 4))), "processFrontMatter 需 ≥1.4.4");
 });

@@ -2,6 +2,16 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。版本号与 `manifest.json` / `versions.json` 保持一致，GitHub Release 的 tag 必须等于版本号。
 
+## 1.0.3 — 2026-11-15
+
+社区目录提交适配，无功能与数据格式变更（vault 内数据、命令、id 均与 1.0.2 相同）。
+
+### 变更
+
+- **manifest `name` 改为「Knowledge Workbench · 知识管理工作台」**：官方新目录自动审核会对 `name === name.toUpperCase()` 的名称判「全大写」而拒收（报错 `This name is not allowed in the directory`）。纯中文名没有大小写、`toUpperCase()` 等于自身，因而被拒；新名称含小写字母，保留中文识别度的同时通过校验。
+- **manifest `description` 改为英文并以句点结尾**：官方要求描述以英文标点 `.` 结尾、不含 Obsidian 字样、≤250 字符；原中文描述以「。」结尾会被判不合规。
+- 单元测试与静态合规自检新增上述命名 / 描述断言，防止回归。
+
 ## 1.0.2 — 2026-11-15
 
 按实机反馈做的三项收口。**云端神经朗读暂时搁置**，插件从「默认零网络请求」进一步收紧为「运行时严格零网络请求」。

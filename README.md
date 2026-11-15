@@ -13,7 +13,7 @@
 1. **手动复制到 vault**（推荐先这样试用）
    把 `main.js`、`manifest.json`、`styles.css` 放进 `<vault>/.obsidian/plugins/knowledge-workbench/`，重启 Obsidian，在「设置 → 第三方插件」中启用。也可使用仓库脚本：`node scripts/link-vault.mjs "<vault 绝对路径>"`。
 2. **BRAT 灰度**：在 BRAT 中添加 `https://github.com/Gintmos/knowledge-workbench`，可自动跟随 Release 更新，适合小范围试用。
-3. **GitHub Release**：从 [Releases 页面](https://github.com/Gintmos/knowledge-workbench/releases) 下载 `knowledge-workbench-1.0.2.zip`，解压后三个文件直接放入上述插件目录。Release 的 tag 必须与 `manifest.json` 的 `version` 一致。
+3. **GitHub Release**：从 [Releases 页面](https://github.com/Gintmos/knowledge-workbench/releases) 下载 `knowledge-workbench-1.0.3.zip`，解压后三个文件直接放入上述插件目录。Release 的 tag 必须与 `manifest.json` 的 `version` 一致。
 
 安装后可通过左侧 ribbon 的「打开知识管理工作台」、命令面板「打开知识管理工作台」或四个页签命令进入。
 
