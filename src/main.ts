@@ -7,6 +7,7 @@ import { WorkbenchService } from "./data/WorkbenchService";
 import { planReview } from "./domain/ReviewService";
 import { todayString } from "./domain/TaskService";
 import { TAB_LABELS, TAB_ORDER } from "./domain/uiModel";
+import { createCloudTtsEngine } from "./speech/cloud";
 import { createDomSpeechEngine } from "./speech/engine";
 import { NoteModal } from "./ui/NoteModal";
 import { WorkbenchView } from "./ui/WorkbenchView";
@@ -45,12 +46,27 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     this.workbench = new WorkbenchService(this.app, this.store, this.index, {
       mobile: Platform.isMobile,
     });
-    // P5：引擎可注入，生产用宿主 Web Speech；断点直接写入 PluginData.read[path]。
+    // 双引擎：云端神经语音（默认关闭）优先，不可用时回退系统语音 + 规则式韵律。
+    const domEngine = createDomSpeechEngine(() => this.speech?.onVoicesChanged());
     this.speech = new SpeechService({
-      engine: createDomSpeechEngine(),
+      engine: domEngine,
+      cloudEngine: createCloudTtsEngine(() => {
+        const settings = this.store.settings;
+        return {
+          enabled: settings.cloudTtsEnabled,
+          url: settings.cloudTtsUrl,
+          key: settings.cloudTtsKey,
+          model: settings.cloudTtsModel,
+          voice: settings.cloudTtsVoice,
+          style: settings.cloudTtsStyle,
+        };
+      }),
       mobile: Platform.isMobile,
       rate: this.store.settings.speechRate,
       preferChineseVoice: this.store.settings.speechPreferChineseVoice,
+      manualVoiceName: this.store.settings.speechVoiceName,
+      prosody: this.store.settings.speechProsody,
+      maxPauseMs: this.store.settings.speechPauseMs,
       progress: {
         get: (path) => this.store.getReadProgress(path),
         set: (path, value) => this.store.setReadProgress(path, value),
@@ -139,6 +155,7 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
         new NoteModal(this.app, file, {
           speech: this.speech,
           autoPlay: true,
+          onExport: (title, text) => void this.saveSpeechDraft(title, text),
         }).open();
       },
     });
@@ -246,6 +263,34 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
       new Notice("已复制 .ics 内容，可粘贴或保存为日历文件");
     } catch {
       new Notice("当前设备不支持剪贴板，请直接在 vault 中打开 .ics 文件");
+    }
+  }
+
+  /** 云端朗读配置变化后允许重新尝试云端引擎。 */
+  refreshSpeechCloud(): void {
+    this.speech.refreshCloud();
+  }
+
+  /**
+   * Android 无系统语音时的替代路径：把清洗后的朗读稿写成普通笔记，
+   * 用户可用系统「随选朗读 / 选择即朗读」发声。仅在用户点按钮时写。
+   */
+  async saveSpeechDraft(title: string, text: string): Promise<void> {
+    const safe = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 60) || "朗读稿";
+    const folder = "知识管理工作台/朗读稿";
+    const target = `${folder}/${safe}.md`;
+    const body = `> 由知识管理工作台生成，供系统朗读使用。\n\n${text}\n`;
+    try {
+      if (!this.app.vault.getAbstractFileByPath(folder)) {
+        await this.app.vault.createFolder(folder);
+      }
+      const existing = this.app.vault.getAbstractFileByPath(target);
+      if (existing instanceof TFile) await this.app.vault.modify(existing, body);
+      else await this.app.vault.create(target, body);
+      new Notice(`朗读稿已保存：${target}`);
+    } catch (error) {
+      console.error("[knowledge-workbench] save speech draft failed", error);
+      new Notice("朗读稿保存失败，请改用「复制朗读稿」。");
     }
   }
 

@@ -7,18 +7,23 @@ import {
   KIND_LABEL,
   TAB_LABELS,
   TAB_ORDER,
-  filterPaths,
+  decodeSelection,
+  encodeSelection,
   groupToday,
   lazyPage,
   nextLoaded,
+  normalizeTabDetail,
   readCategory,
   restoreViewState,
   shouldLoadMore,
   todayCardTitle,
   writeCategory,
+  type ChartScope,
 } from "../domain/uiModel";
-import { CHART_LIMIT, VIEW_TYPE_WORKBENCH } from "../types";
+import { VIEW_TYPE_WORKBENCH } from "../types";
 import type {
+  CategoryCount,
+  ChartSlice,
   DomainSnapshot,
   IndexStatus,
   NoteRecord,
@@ -37,8 +42,9 @@ const PHASE_TEXT: Record<string, string> = {
 };
 
 /**
- * P4 正式视图：四个页签 + 内联 SVG 柱状图 + 统一 Markdown 弹窗 + 浏览历史。
- * 位置、折叠与分类筛选都写回 PluginData，同一天内重新打开可恢复。
+ * 正式视图：四个页签（今日 / 复习 / 统计 / 浏览历史）。
+ * 统计页两个已有卡片内嵌全量柱状图，点柱子或分类名原地展开笔记清单，
+ * 笔记名直达 vault 原文。渲染全程 try/catch，任何异常都不会留下空白页。
  */
 export class WorkbenchView extends ItemView {
   private readonly plugin: KnowledgeWorkbenchPlugin;
@@ -48,6 +54,7 @@ export class WorkbenchView extends ItemView {
   private scrollEl?: HTMLElement;
   private paneEl?: HTMLElement;
   private tab: WorkbenchTab = "today";
+  /** 持久化的选中项（encodeSelection 后的字符串），旧脏值在 normalize 阶段清除。 */
   private category: string | null = null;
   private restoringScroll = false;
   private detailScroll = 0;
@@ -121,22 +128,56 @@ export class WorkbenchView extends ItemView {
 
     this.paneEl.empty();
     this.updateTabs();
-    const domain = this.plugin.workbench.getSnapshot();
-    const status = this.plugin.index.getStatus();
+    try {
+      const domain = this.plugin.workbench.getSnapshot();
+      const status = this.plugin.index.getStatus();
 
-    if (this.tab === "today") this.renderToday(this.paneEl, domain);
-    else if (this.tab === "knowledge") this.renderKnowledge(this.paneEl, domain);
-    else if (this.tab === "review") this.renderReview(this.paneEl, domain);
-    else this.renderStats(this.paneEl, domain, status);
+      if (this.tab === "today") this.renderToday(this.paneEl, domain);
+      else if (this.tab === "review") this.renderReview(this.paneEl, domain);
+      else if (this.tab === "history") this.renderHistory(this.paneEl);
+      else this.renderStats(this.paneEl, domain, status);
 
-    this.renderFooter(this.paneEl);
+      this.renderFooter(this.paneEl);
+    } catch (error) {
+      console.error("[knowledge-workbench] render failed", error);
+      this.renderError(this.paneEl, error);
+    }
 
-    const detail = this.paneEl.querySelector<HTMLElement>(".kw-detail");
-    if (detail) {
+    for (const detail of Array.from(
+      this.paneEl.querySelectorAll<HTMLElement>(".kw-detail"),
+    )) {
       enableDragScroll(detail);
       detail.scrollTop = this.detailScroll;
     }
     if (savedScroll > 0) this.applyScroll(savedScroll);
+  }
+
+  /** 渲染异常时的自救卡片：永远保留可见内容与「重置视图」按钮。 */
+  private renderError(parent: HTMLElement, error: unknown): void {
+    const card = parent.createDiv({ cls: "kw-card kw-error-card" });
+    card.createDiv({ cls: "kw-card-title", text: "界面渲染出错" });
+    card.createDiv({
+      cls: "kw-hint",
+      text:
+        "已阻止空白页。可以点「重置视图」清除页签与分类筛选后重新渲染；原始错误已写入开发者控制台。",
+    });
+    card.createDiv({
+      cls: "kw-hint",
+      text: `错误摘要：${error instanceof Error ? error.message : String(error)}`,
+    });
+    const reset = card.createEl("button", { text: "重置视图" });
+    reset.addEventListener("click", () => {
+      this.category = null;
+      this.tab = "today";
+      this.detailScroll = 0;
+      this.plugin.store.patchView({
+        tab: "today",
+        scrollY: 0,
+        tabDetail: {},
+      });
+      this.render();
+      if (this.scrollEl) this.scrollEl.scrollTop = 0;
+    });
   }
 
   private updateTabs(): void {
@@ -256,121 +297,6 @@ export class WorkbenchView extends ItemView {
     });
   }
 
-  // ── 知识库 ────────────────────────────────────────────────
-  private renderKnowledge(parent: HTMLElement, domain: DomainSnapshot): void {
-    const chartCard = parent.createDiv({ cls: "kw-card" });
-    chartCard.createDiv({ cls: "kw-card-title", text: "分类统计" });
-    const host = chartCard.createDiv({ cls: "kw-chart-host" });
-    renderChart(host, domain.chart, this.category, (key) => {
-      this.category = key;
-      this.detailScroll = 0;
-      this.plugin.store.patchView({
-        tabDetail: writeCategory(this.plugin.store.view.tabDetail, key),
-      });
-      this.render();
-    });
-    chartCard.createDiv({
-      cls: "kw-hint",
-      text: `共 ${domain.noteCount} 篇 / ${domain.categories.length} 类；逐篇统计不设上限，仅柱状图取 Top ${CHART_LIMIT}，长尾归入「其他」。点击柱子筛选，再点一次取消。`,
-    });
-
-    const detailCard = parent.createDiv({ cls: "kw-card" });
-    const head = detailCard.createDiv({ cls: "kw-detail-head" });
-    head.createDiv({
-      cls: "kw-card-title",
-      text: this.category ? `分类明细 · ${this.category}` : "分类明细（全部）",
-    });
-    if (this.category) {
-      const clear = head.createEl("button", {
-        cls: "kw-open-btn",
-        text: "清除筛选",
-      });
-      clear.addEventListener("click", () => {
-        this.category = null;
-        this.detailScroll = 0;
-        this.plugin.store.patchView({
-          tabDetail: writeCategory(this.plugin.store.view.tabDetail, null),
-        });
-        this.render();
-      });
-    }
-
-    const allowed = filterPaths(domain.chart, this.category);
-    const notes = this.plugin.index
-      .getNotes()
-      .filter((note) => !allowed || allowed.has(note.path))
-      .sort((a, b) => b.mtime - a.mtime);
-    // P6：万篇库下分批渲染，首屏只创建 60 行；滚动到底或点按钮追加下一批。
-    const hint = detailCard.createDiv({ cls: "kw-hint" });
-    const detail = detailCard.createDiv({ cls: "kw-detail" });
-    const more = detailCard.createEl("button", {
-      cls: "kw-load-more",
-      text: "加载更多",
-    });
-    more.setAttr("type", "button");
-    let loaded = 0;
-    const updateHint = (): void => {
-      hint.setText(
-        `已显示 ${loaded} / ${notes.length} 篇 · 明细区可滚动、可按住鼠标拖动；滚动到底部自动加载更多。标题在弹窗中按 Markdown 渲染。`,
-      );
-    };
-    const appendBatch = (): void => {
-      const from = loaded;
-      loaded = nextLoaded(loaded, notes.length);
-      for (const note of notes.slice(from, loaded)) this.renderNoteRow(detail, note);
-      if (lazyPage(notes, loaded).hasMore) more.removeAttribute("hidden");
-      else more.setAttr("hidden", "true");
-      updateHint();
-    };
-
-    if (!notes.length) {
-      detail.createDiv({ cls: "kw-empty", text: "没有匹配的笔记。" });
-      more.setAttr("hidden", "true");
-      updateHint();
-    } else {
-      appendBatch();
-      more.addEventListener("click", appendBatch);
-      detail.addEventListener("scroll", () => {
-        if (shouldLoadMore(detail.scrollTop, detail.clientHeight, detail.scrollHeight)) {
-          appendBatch();
-        }
-      });
-    }
-
-    const historyCard = parent.createDiv({ cls: "kw-card" });
-    new HistoryView(historyCard, (path) => this.openNote(path)).render(
-      this.plugin.store.history,
-    );
-  }
-
-  private renderNoteRow(parent: HTMLElement, note: NoteRecord): void {
-    const row = parent.createDiv({ cls: "kw-note-row" });
-    const link = row.createEl("a", {
-      cls: "kw-note-link",
-      text: note.title || note.path,
-    });
-    link.setAttr("href", "#");
-    link.addEventListener("click", (event: MouseEvent) => {
-      event.preventDefault();
-      this.openNote(note.path);
-    });
-    const open = row.createEl("button", {
-      cls: "kw-open-btn",
-      text: "打开原文",
-    });
-    open.addEventListener("click", () => this.openOriginal(note.path));
-    const tags = note.tags.length
-      ? note.tags.map((tag) => `#${tag}`).join(" ")
-      : "无标签";
-    row.createDiv({
-      cls: "kw-note-meta",
-      text: `${tags} · ${new Date(note.mtime).toLocaleDateString("zh-CN")} · ${note.path}`,
-    });
-    if (note.summary) {
-      row.createDiv({ cls: "kw-note-summary", text: note.summary });
-    }
-  }
-
   // ── 复习 ──────────────────────────────────────────────────
   private renderReview(parent: HTMLElement, domain: DomainSnapshot): void {
     const dueCard = parent.createDiv({ cls: "kw-card" });
@@ -432,12 +358,24 @@ export class WorkbenchView extends ItemView {
     });
   }
 
+  // ── 浏览历史（独立页签）────────────────────────────────────
+  private renderHistory(parent: HTMLElement): void {
+    const card = parent.createDiv({ cls: "kw-card" });
+    new HistoryView(
+      card,
+      (path) => this.openNote(path),
+      (path) => this.openOriginal(path),
+    ).render(this.plugin.store.history);
+  }
+
   // ── 统计 ──────────────────────────────────────────────────
   private renderStats(
     parent: HTMLElement,
     domain: DomainSnapshot,
     status: IndexStatus,
   ): void {
+    const selection = decodeSelection(this.category);
+
     const card = parent.createDiv({ cls: "kw-card" });
     card.createDiv({ cls: "kw-card-title", text: "索引状态" });
     const grid = card.createDiv({ cls: "kw-grid" });
@@ -502,39 +440,89 @@ export class WorkbenchView extends ItemView {
     );
     icsCard.createDiv({ cls: "kw-hint", text: `路径：${domain.ics.path}` });
 
+    // 已有卡片：全量分类。只在卡片内部追加图表，不新增卡片、不改 layout。
     const countsCard = parent.createDiv({ cls: "kw-card" });
     countsCard.createDiv({
       cls: "kw-card-title",
       text: `全量分类（${domain.categories.length} 类，逐篇统计不设上限）`,
     });
-    const detail = countsCard.createDiv({ cls: "kw-detail kw-detail-short" });
-    for (const item of domain.categories) {
-      const row = detail.createDiv({ cls: "kw-count-row" });
-      row.createSpan({ cls: "kw-count-key", text: item.key });
-      row.createSpan({ cls: "kw-count-value", text: `${item.count} 篇` });
-    }
-    if (!domain.categories.length) {
-      detail.createDiv({ cls: "kw-empty", text: "尚无索引结果。" });
+    const activeCategory =
+      selection?.scope === "category" ? selection.key : null;
+    const catHost = countsCard.createDiv({ cls: "kw-chart-scroll" });
+    const catGeo = renderChart(
+      catHost,
+      domain.chart,
+      activeCategory,
+      (key) => this.selectSlice("category", key),
+    );
+    countsCard.createDiv({
+      cls: "kw-hint",
+      text: catGeo.truncated
+        ? `共 ${catGeo.totalSlices} 类，图表显示前 ${catGeo.bars.length} 类（列表仍为全量）；横向滚动查看，点柱子或分类名看笔记清单。`
+        : `共 ${catGeo.totalSlices} 类全部出柱；横向滚动查看，点柱子或分类名看笔记清单。`,
+    });
+    const pickedCategory = activeCategory
+      ? domain.chart.find((slice) => slice.key === activeCategory)
+      : undefined;
+    if (pickedCategory) {
+      this.renderCategoryNotes(countsCard, pickedCategory, domain, "category");
+    } else {
+      const detail = countsCard.createDiv({
+        cls: "kw-detail kw-detail-short",
+      });
+      this.renderCountRows(detail, domain.categories, (key) => key, "category");
+      if (!domain.categories.length) {
+        detail.createDiv({ cls: "kw-empty", text: "尚无索引结果。" });
+      }
     }
 
+    // 已有卡片：标签 / 文件夹。图表 key 与列表行显示名完全一致。
     const tagCard = parent.createDiv({ cls: "kw-card" });
     tagCard.createDiv({
       cls: "kw-card-title",
       text: `标签 / 文件夹（标签 ${domain.tagCounts.length} 个，文件夹 ${domain.folderCounts.length} 个）`,
     });
-    const tagDetail = tagCard.createDiv({ cls: "kw-detail kw-detail-short" });
-    for (const item of domain.tagCounts.slice(0, 30)) {
-      const row = tagDetail.createDiv({ cls: "kw-count-row" });
-      row.createSpan({ cls: "kw-count-key", text: `#${item.key}` });
-      row.createSpan({ cls: "kw-count-value", text: `${item.count} 篇` });
-    }
-    for (const item of domain.folderCounts.slice(0, 30)) {
-      const row = tagDetail.createDiv({ cls: "kw-count-row" });
-      row.createSpan({ cls: "kw-count-key", text: `目录 · ${item.key}` });
-      row.createSpan({ cls: "kw-count-value", text: `${item.count} 篇` });
-    }
-    if (!domain.tagCounts.length && !domain.folderCounts.length) {
-      tagDetail.createDiv({ cls: "kw-empty", text: "尚无标签与目录统计。" });
+    const activeDetail = selection?.scope === "detail" ? selection.key : null;
+    const tagHost = tagCard.createDiv({ cls: "kw-chart-scroll" });
+    const tagGeo = renderChart(
+      tagHost,
+      domain.detailChart,
+      activeDetail,
+      (key) => this.selectSlice("detail", key),
+    );
+    tagCard.createDiv({
+      cls: "kw-hint",
+      text: tagGeo.truncated
+        ? `共 ${tagGeo.totalSlices} 项，图表显示前 ${tagGeo.bars.length} 项；横向滚动查看，点柱子或名称看笔记清单。`
+        : `标签与目录共 ${tagGeo.totalSlices} 项全部出柱；横向滚动查看，点柱子或名称看笔记清单。`,
+    });
+    const pickedDetail = activeDetail
+      ? domain.detailChart.find((slice) => slice.key === activeDetail)
+      : undefined;
+    if (pickedDetail) {
+      this.renderCategoryNotes(tagCard, pickedDetail, domain, "detail");
+    } else {
+      const tagDetail = tagCard.createDiv({
+        cls: "kw-detail kw-detail-short",
+      });
+      this.renderCountRows(
+        tagDetail,
+        domain.tagCounts.slice(0, 30),
+        (key) => `#${key}`,
+        "detail",
+      );
+      this.renderCountRows(
+        tagDetail,
+        domain.folderCounts.slice(0, 30),
+        (key) => `目录 · ${key}`,
+        "detail",
+      );
+      if (!domain.tagCounts.length && !domain.folderCounts.length) {
+        tagDetail.createDiv({
+          cls: "kw-empty",
+          text: "尚无标签与目录统计。",
+        });
+      }
     }
 
     const actions = parent.createDiv({ cls: "kw-actions" });
@@ -548,10 +536,142 @@ export class WorkbenchView extends ItemView {
     copy.addEventListener("click", () => void this.plugin.copyIcs());
   }
 
+  private renderCountRows(
+    parent: HTMLElement,
+    counts: CategoryCount[],
+    label: (key: string) => string,
+    scope: ChartScope,
+  ): void {
+    for (const item of counts) {
+      const row = parent.createDiv({ cls: "kw-count-row" });
+      const link = row.createEl("a", {
+        cls: "kw-count-key kw-count-link",
+        text: label(item.key),
+      });
+      link.setAttr("href", "#");
+      link.setAttr("aria-label", `查看${label(item.key)}的笔记清单`);
+      link.addEventListener("click", (event: MouseEvent) => {
+        event.preventDefault();
+        this.selectSlice(scope, label(item.key));
+      });
+      row.createSpan({ cls: "kw-count-value", text: `${item.count} 篇` });
+    }
+  }
+
+  /** 点击柱子 / 名称后：在同一张卡片内原地展开该分类的笔记清单。 */
+  private renderCategoryNotes(
+    card: HTMLElement,
+    slice: ChartSlice,
+    domain: DomainSnapshot,
+    scope: ChartScope,
+  ): void {
+    const head = card.createDiv({ cls: "kw-detail-head" });
+    head.createDiv({
+      cls: "kw-card-title",
+      text: `笔记清单 · ${slice.key}`,
+    });
+    const clear = head.createEl("button", {
+      cls: "kw-open-btn",
+      text: "返回分类列表",
+    });
+    clear.addEventListener("click", () => this.selectSlice(scope, null));
+    const percent = domain.noteCount
+      ? ((slice.count / domain.noteCount) * 100).toFixed(1)
+      : "0.0";
+    card.createDiv({
+      cls: "kw-hint",
+      text: `${slice.count} 篇 / 全库 ${domain.noteCount} 篇，占 ${percent}%；点击笔记名直达原文，「预览」打开带朗读的弹窗。`,
+    });
+
+    const allowed = new Set(slice.paths);
+    const notes = this.plugin.index
+      .getNotes()
+      .filter((note) => allowed.has(note.path))
+      .sort((a, b) => b.mtime - a.mtime);
+    const hint = card.createDiv({ cls: "kw-hint" });
+    const detail = card.createDiv({ cls: "kw-detail" });
+    const more = card.createEl("button", {
+      cls: "kw-load-more",
+      text: "加载更多",
+    });
+    more.setAttr("type", "button");
+    let loaded = 0;
+    const updateHint = (): void => {
+      hint.setText(
+        `已显示 ${loaded} / ${notes.length} 篇 · 明细区可滚动、可按住鼠标拖动；滚动到底部自动加载更多。`,
+      );
+    };
+    const appendBatch = (): void => {
+      const from = loaded;
+      loaded = nextLoaded(loaded, notes.length);
+      for (const note of notes.slice(from, loaded)) {
+        this.renderCategoryNoteRow(detail, note);
+      }
+      if (lazyPage(notes, loaded).hasMore) more.removeAttribute("hidden");
+      else more.setAttr("hidden", "true");
+      updateHint();
+    };
+
+    if (!notes.length) {
+      detail.createDiv({ cls: "kw-empty", text: "没有匹配的笔记。" });
+      more.setAttr("hidden", "true");
+      updateHint();
+    } else {
+      appendBatch();
+      more.addEventListener("click", appendBatch);
+      detail.addEventListener("scroll", () => {
+        if (shouldLoadMore(detail.scrollTop, detail.clientHeight, detail.scrollHeight)) {
+          appendBatch();
+        }
+      });
+    }
+  }
+
+  /** 清单里的笔记名是「直达原文」链接，预览按钮才打开 Markdown 弹窗。 */
+  private renderCategoryNoteRow(parent: HTMLElement, note: NoteRecord): void {
+    const row = parent.createDiv({ cls: "kw-note-row" });
+    const link = row.createEl("a", {
+      cls: "kw-note-link",
+      text: note.title || note.path,
+    });
+    link.setAttr("href", "#");
+    link.addEventListener("click", (event: MouseEvent) => {
+      event.preventDefault();
+      this.openOriginal(note.path);
+    });
+    const preview = row.createEl("button", {
+      cls: "kw-open-btn",
+      text: "预览",
+    });
+    preview.addEventListener("click", () => this.openNote(note.path));
+    const tags = note.tags.length
+      ? note.tags.map((tag) => `#${tag}`).join(" ")
+      : "无标签";
+    row.createDiv({
+      cls: "kw-note-meta",
+      text: `${tags} · ${new Date(note.mtime).toLocaleDateString("zh-CN")} · ${note.path}`,
+    });
+    if (note.summary) {
+      row.createDiv({ cls: "kw-note-summary", text: note.summary });
+    }
+  }
+
+  private selectSlice(scope: ChartScope, key: string | null): void {
+    this.category = key ? encodeSelection({ scope, key }) : null;
+    this.detailScroll = 0;
+    this.plugin.store.patchView({
+      tabDetail: writeCategory(
+        normalizeTabDetail(this.plugin.store.view.tabDetail),
+        this.category,
+      ),
+    });
+    this.render();
+  }
+
   private renderFooter(parent: HTMLElement): void {
     parent.createDiv({
       cls: "kw-hint kw-footer",
-      text: `知识管理工作台 v${this.plugin.manifest.version} · 业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责，本插件零网络请求。`,
+      text: `知识管理工作台 v${this.plugin.manifest.version} · 业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责。默认零网络请求，仅在你显式开启云端朗读时才会向自填服务地址发送待朗读文本。`,
     });
   }
 
@@ -566,6 +686,7 @@ export class WorkbenchView extends ItemView {
       new NoteModal(this.app, file, {
         speech: this.plugin.speech,
         autoResume: () => this.plugin.store.settings.speechAutoResume,
+        onExport: (title, text) => void this.plugin.saveSpeechDraft(title, text),
       }).open();
     }
   }

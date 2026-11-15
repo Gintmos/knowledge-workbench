@@ -2,6 +2,33 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。版本号与 `manifest.json` / `versions.json` 保持一致，GitHub Release 的 tag 必须等于版本号。
 
+## 1.0.1 — 2026-11-15
+
+实机检查后的缺陷修复与体验优化。默认仍是零网络请求；云端神经朗读为**显式开启的可选功能**。
+
+### 修复
+
+- **致命缺陷**：`Chart.ts` 曾把 `"kw-chart-col is-active"` 当作单个类名传给宿主的 `createSvg`，命中 `classList.add` 的空格校验异常，导致点柱子后整页渲染中断、只剩标题，且筛选值持久化后页签重启仍卡死。改为事后 `classList.add("is-active")`。
+- **渲染兜底**：`WorkbenchView.render()` 全程 try/catch，异常时显示错误卡片与「重置视图」按钮，杜绝空白页；旧 `data.json` 中的坏死筛选值在 `normalizeData` 阶段自动清除。
+- **Outlook 导入**：全天事件补齐 `DTEND;VALUE=DATE:<次日>`，并加 `X-WR-CALNAME`、`SEQUENCE`、`STATUS`、`X-MICROSOFT-CDO-ALLDAYEVENT`、`X-MICROSOFT-CDO-BUSYSTATUS`；仍保持 CRLF、75 octets 折行与稳定 UID。`scripts/ics-samples.mjs` 生成 A/B/C/D 四个对照样本。
+- **漏测补齐**：桌面 CDP 验收加入「真实点击 SVG 柱」「点击分类名」「笔记名直达原文」「渲染兜底」等检查。
+
+### 变更
+
+- 取消「知识库」页签与全库明细；浏览历史独立成最右页签。页签顺序：今日要处理 / 复习 / 统计 / 浏览历史。
+- 统计页内容与 layout 不变，只在「全量分类」「标签 / 文件夹」两张**已有卡片**内各嵌一张全量柱状图（所有类别都出柱，横向滚动查看）；点柱子或分类名在该卡片内展开笔记清单，笔记名直达 vault 原文，「预览」打开带朗读的弹窗。
+- 柱状图不再使用「Top 10 + 其他」语义；`chartSlices` 保留给旧有限图表调用方，统计页改用 `allCategorySlices` / `detailSlices`。
+
+### 新增
+
+- **朗读韵律（方案 A）**：句群分块（逗号 / 顿号不再切碎）、按标点注入句间停顿、动态 rate / pitch、Natural / Neural 音色优选、可手动指定系统音色、口语化 Markdown 清洗与标题停顿。
+- **可选云端神经 TTS**：兼容 OpenAI `/v1/audio/speech` 及同类网关，`requestUrl` + data URI 播放，默认关闭、地址与密钥留空；离线 / 失败自动回退方案 A。仅发送当前朗读文本块，不发送笔记路径或索引。
+- **Android 替代路径**：无 Web Speech 时提供「复制朗读稿」「保存朗读稿到库内」，交给系统「随选朗读」；语音能力提示改为准确描述宿主限制。
+
+### 验证
+
+- `npm test` 108/108（新增 9 项 1.0.1 专项回归）；`npm run release:check` 47/47；`npm run benchmark` 11/11；桌面 CDP 真机验收见 `dist/live-smoke.json`。
+
 ## 1.0.0 — 2026-11-15
 
 首个可用版本，对应开发计划 P1–P6 的全部范围。零后端、零网络请求、零运行时依赖，桌面与手机双端（`isDesktopOnly: false`）。

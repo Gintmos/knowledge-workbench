@@ -1,6 +1,7 @@
 import {
-  chartSlices,
+  allCategorySlices,
   countByCategory,
+  detailSlices,
   folderCounts,
   tagCounts,
 } from "./ClassifierService";
@@ -37,7 +38,8 @@ export function buildDomainSnapshot(
     noteCount: notes.length,
     today: todaySummary,
     categories: countByCategory(notes, settings.classifyBy),
-    chart: chartSlices(notes, settings.classifyBy),
+    chart: allCategorySlices(notes, settings.classifyBy),
+    detailChart: detailSlices(notes),
     tagCounts: tagCounts(notes),
     folderCounts: folderCounts(notes),
     ics: {

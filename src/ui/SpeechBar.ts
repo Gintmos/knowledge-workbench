@@ -17,6 +17,8 @@ export interface SpeechBarOptions {
   speech: SpeechService;
   autoPlay?: boolean;
   autoResume?: () => boolean;
+  /** 保存朗读稿到 vault，供 Android 交给系统「随选朗读」。 */
+  onExport?: (text: string) => void;
 }
 
 export class SpeechBar {
@@ -34,6 +36,9 @@ export class SpeechBar {
   private readonly fill: HTMLElement;
   private readonly thumb: HTMLElement;
   private readonly hintEl: HTMLElement;
+  private readonly engineEl: HTMLElement;
+  private readonly fallbackEl: HTMLElement;
+  private readonly onExport?: (text: string) => void;
   private unsubscribe?: () => void;
   private dragging = false;
   private previewRatio: number | null = null;
@@ -53,6 +58,7 @@ export class SpeechBar {
     this.stopBtn = row.createEl("button", { cls: "kw-speech-btn", text: "停止" });
     this.countEl = row.createSpan({ cls: "kw-speech-count", text: "0 / 0 段" });
     this.stateEl = row.createSpan({ cls: "kw-speech-state", text: "就绪" });
+    this.engineEl = row.createSpan({ cls: "kw-speech-engine", text: "" });
 
     this.slider = this.controls.createDiv({ cls: "kw-speech-slider" });
     this.slider.setAttr("role", "slider");
@@ -63,6 +69,35 @@ export class SpeechBar {
     this.thumb = this.slider.createDiv({ cls: "kw-speech-thumb" });
 
     this.hintEl = this.root.createDiv({ cls: "kw-speech-hint" });
+    this.onExport = options.onExport;
+    this.fallbackEl = this.root.createDiv({ cls: "kw-speech-fallback" });
+    this.fallbackEl.createDiv({
+      cls: "kw-hint",
+      text: "Android 的 WebView 通常不提供 Web Speech。要真人级语气，请在「设置 → 朗读」开启云端神经语音并填写服务地址与密钥；离线时可把朗读稿复制到剪贴板或保存到库内，再用系统「随选朗读 / 选择即朗读」发声。",
+    });
+    const fallbackRow = this.fallbackEl.createDiv({ cls: "kw-speech-row" });
+    const copy = fallbackRow.createEl("button", {
+      cls: "kw-speech-btn",
+      text: "复制朗读稿",
+    });
+    copy.addEventListener("click", () => {
+      void navigator.clipboard
+        .writeText(this.speech.getPlainText())
+        .then(() => this.hintEl.setText("朗读稿已复制，可粘贴到系统朗读或笔记中。"))
+        .catch(() => this.hintEl.setText("复制失败，请改用「保存朗读稿到库内」。"));
+    });
+    const save = fallbackRow.createEl("button", {
+      cls: "kw-speech-btn",
+      text: "保存朗读稿到库内",
+    });
+    save.addEventListener("click", () => {
+      if (!this.onExport) {
+        this.hintEl.setText("当前入口未提供保存能力，请改用复制。");
+        return;
+      }
+      this.onExport(this.speech.getPlainText());
+      this.hintEl.setText("已保存到「知识管理工作台/朗读稿」，可用系统朗读打开。");
+    });
 
     this.playBtn.addEventListener("click", () => this.speech.play());
     this.pauseBtn.addEventListener("click", () => this.speech.pause());
@@ -120,6 +155,8 @@ export class SpeechBar {
     const preview = state.preview
       ? `${state.preview.slice(0, 60)}${state.preview.length > 60 ? "…" : ""}`
       : "";
+    this.engineEl.setText(state.engineLabel);
+    this.fallbackEl.classList.toggle("kw-hidden", state.supported);
     this.hintEl.setText(
       state.message || preview || "点「朗读」开始听这篇笔记；进度可拖动，关闭窗口会保存断点。",
     );

@@ -11,11 +11,16 @@ export const INDEX_VERSION = 1;
  */
 export const SUMMARY_ALGO = 2;
 export const HISTORY_LIMIT = 20;
+/** 旧版「Top 10 + 其他」语义保留给有限图表；新版统计卡片使用全量柱状图。 */
 export const CHART_LIMIT = 10;
+/** 全量柱状图每根柱子的最小槽宽（px），超出容器宽度时横向滚动。 */
+export const CHART_MIN_SLOT = 62;
+/** 防御上限：极端库只画前 200 根柱子，列表仍是全量。 */
+export const CHART_MAX_BARS = 200;
 export const SUMMARY_LIMIT = 120;
 export const INDEX_PATH_DEFAULT = "知识管理工作台/index.json";
 
-export type WorkbenchTab = "today" | "knowledge" | "review" | "stats";
+export type WorkbenchTab = "today" | "review" | "stats" | "history";
 export type ClassifyBy = "tag" | "folder";
 
 export interface ReadProgress {
@@ -49,6 +54,19 @@ export interface WorkbenchSettings {
   /** P5 新增：中文音色优先、打开笔记弹窗时自动从断点续读（默认关闭，避免意外发声）。 */
   speechPreferChineseVoice: boolean;
   speechAutoResume: boolean;
+  /** 规则式韵律（句群分块 / 停顿 / 动态 rate-pitch），离线与回退路径使用。 */
+  speechProsody: boolean;
+  /** 手动指定系统音色名；空串表示自动优选中文 / Natural 音色。 */
+  speechVoiceName: string;
+  /** 块间停顿上限（毫秒）；0 表示关闭，生产默认 420。 */
+  speechPauseMs: number;
+  /** 可选云端神经 TTS：默认全部关闭，需用户显式开启并填写自有的服务地址与密钥。 */
+  cloudTtsEnabled: boolean;
+  cloudTtsUrl: string;
+  cloudTtsKey: string;
+  cloudTtsModel: string;
+  cloudTtsVoice: string;
+  cloudTtsStyle: string;
   writeSummaryToFrontmatter: boolean;
   /** P3 新增：分类维度、复习日期写回开关、.ics 总开关。 */
   classifyBy: ClassifyBy;
@@ -144,7 +162,7 @@ export interface CategoryCount {
   count: number;
 }
 
-/** 柱状图切片：≤ CHART_LIMIT 根柱子，长尾归并到「其他」，并保留可点击的笔记路径。 */
+/** 柱状图切片：保留可点击的笔记路径；全量图表不再归并「其他」。 */
 export interface ChartSlice {
   key: string;
   count: number;
@@ -175,8 +193,10 @@ export interface DomainSnapshot {
   today: TodaySummary;
   /** 全量分类计数，逐篇统计不设上限（v9 语义）。 */
   categories: CategoryCount[];
-  /** 仅图表用，最多 10 根柱子。 */
+  /** 全量主分类柱状图切片（所有类别，横向滚动查看）。 */
   chart: ChartSlice[];
+  /** 「标签 / 文件夹」卡片的柱状图切片，key 为列表中的显示名。 */
+  detailChart: ChartSlice[];
   tagCounts: CategoryCount[];
   folderCounts: CategoryCount[];
   ics: IcsState;
@@ -190,6 +210,15 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
   speechRate: 1,
   speechPreferChineseVoice: true,
   speechAutoResume: false,
+  speechProsody: true,
+  speechVoiceName: "",
+  speechPauseMs: 420,
+  cloudTtsEnabled: false,
+  cloudTtsUrl: "",
+  cloudTtsKey: "",
+  cloudTtsModel: "gpt-4o-mini-tts",
+  cloudTtsVoice: "alloy",
+  cloudTtsStyle: "用自然、平和的普通话朗读，按语义断句，疑问句尾音上扬，长句适当停顿，不要机械地逐字念。",
   writeSummaryToFrontmatter: false,
   classifyBy: "tag",
   writeReviewToFrontmatter: false,

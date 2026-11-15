@@ -28,9 +28,14 @@ export interface SpeechVoice {
 }
 
 export interface SpeakOptions {
+  /** 用户设定的基准语速，不随韵律波动。 */
   rate: number;
   lang: string;
   voice: SpeechVoice | null;
+  /** 句群韵律倍率，由引擎乘到 rate 上；缺省 1 保持旧行为。 */
+  rateScale?: number;
+  /** 句群音高，缺省 1。 */
+  pitch?: number;
 }
 
 export interface SpeakHandlers {
@@ -44,8 +49,14 @@ export interface SpeakHandlers {
  * 服务层不直接触碰 window，便于在 Node 里跑全链路单测。
  */
 export interface SpeechEngine {
+  /** 用于界面显示当前生效的引擎。 */
+  label?: string;
+  /** 是否需要 10s pause/resume 保活；云端 <audio> 引擎不需要。 */
+  needsKeepAlive?: boolean;
   supported(): boolean;
   getVoices(): SpeechVoice[];
+  /** 宿主是否确实提供了可用音色（Android WebView 常为 false）。 */
+  hasVoices?(): boolean;
   speak(text: string, options: SpeakOptions, handlers: SpeakHandlers): void;
   cancel(): void;
   pause(): void;
@@ -74,4 +85,6 @@ export interface SpeechSnapshot {
   resumable: boolean;
   /** 当前块文本预览，便于界面显示「正在朗读」。 */
   preview: string;
+  /** 当前生效的引擎：云端神经语音 / 系统语音 / 不可用。 */
+  engineLabel: string;
 }

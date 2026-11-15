@@ -5,6 +5,7 @@ data.json
 test-vault/
 .tmp-tests/
 .tmp-bench/
+.tmp-ics/
 dist/
 *.log
 .DS_Store

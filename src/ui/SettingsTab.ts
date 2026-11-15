@@ -39,7 +39,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     // 常规项直接置顶、不加 heading，后续分组才用 setHeading() 且标题不含「设置」。
     containerEl.createDiv({
       cls: "kw-settings-intro",
-      text: "纯本地 vault 数据：零后端、零网络请求，桌面与手机端行为一致。点击每项右侧的 (i) 查看说明。",
+      text: "纯本地 vault 数据：默认零后端、零网络请求，桌面与手机端行为一致；仅在显式开启云端神经朗读后，才向自填服务地址发送朗读文本。点击每项右侧的 (i) 查看说明。",
     });
 
     // 操作结果反馈放在说明区之外，便于区分「配置说明」与「执行结果」。
@@ -64,7 +64,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       );
     addInfo(
       classify,
-      "主分类按标签的第一段或笔记所在的第一层文件夹。逐篇统计始终不设上限；只有柱状图取 Top 10，长尾归入「其他」。",
+      "主分类按标签的第一段或笔记所在的第一层文件夹。逐篇统计不设上限；统计页两个已有卡片内嵌全量柱状图，所有类别都出柱，横向滚动查看，点击可展开该分类的笔记清单。",
     );
 
     const stale = new Setting(containerEl)
@@ -243,6 +243,100 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     // ── 朗读 ────────────────────────────────────────────────
     new Setting(containerEl).setName("朗读").setHeading();
 
+    const cloudEnabled = new Setting(containerEl)
+      .setName("启用云端神经语音")
+      .addToggle((toggle) =>
+        toggle.setValue(settings.cloudTtsEnabled).onChange((value) => {
+          plugin.store.updateSettings({ cloudTtsEnabled: value });
+          plugin.refreshSpeechCloud();
+          feedback.setText(
+            value
+              ? "已开启云端朗读：请确认服务地址与密钥已填写，失败会自动回退系统语音。"
+              : "已关闭云端朗读，插件恢复默认零网络请求。",
+          );
+        }),
+      );
+    addInfo(
+      cloudEnabled,
+      "默认关闭，插件完全不联网。开启后朗读时仅把当前这一块纯文本发到你填写的服务地址（不发送笔记路径、索引或 vault 内容），兼容 OpenAI 的 speech 接口及同类网关，示例地址见 README。Android WebView 不提供系统语音，这是获得真人级语气的路径；离线或失败时自动回退规则式系统语音。",
+    );
+
+    const cloudUrl = new Setting(containerEl)
+      .setName("服务地址")
+      .addText((text) =>
+        text
+          .setPlaceholder("留空则不联网，示例见 README")
+          .setValue(settings.cloudTtsUrl)
+          .onChange((value) => {
+            plugin.store.updateSettings({ cloudTtsUrl: value.trim() });
+            plugin.refreshSpeechCloud();
+          }),
+      );
+    addInfo(
+      cloudUrl,
+      "填写完整的语音合成接口地址（含协议前缀）。地址与密钥只存在本机插件数据里；请勿使用来路不明的第三方网关。",
+    );
+
+    const cloudKey = new Setting(containerEl)
+      .setName("API 密钥")
+      .addText((text) => {
+        text
+          .setPlaceholder("留空则不联网")
+          .setValue(settings.cloudTtsKey)
+          .onChange((value) => {
+            plugin.store.updateSettings({ cloudTtsKey: value.trim() });
+            plugin.refreshSpeechCloud();
+          });
+        text.inputEl.type = "password";
+      });
+    addInfo(
+      cloudKey,
+      "只作为 Bearer 凭据随请求发送，不写日志、不入库、不随 vault 同步。留空时云端引擎视为不可用。",
+    );
+
+    const cloudModel = new Setting(containerEl)
+      .setName("模型")
+      .addText((text) =>
+        text
+          .setPlaceholder("gpt-4o-mini-tts")
+          .setValue(settings.cloudTtsModel)
+          .onChange((value) => {
+            plugin.store.updateSettings({
+              cloudTtsModel: value.trim() || settings.cloudTtsModel,
+            });
+            plugin.refreshSpeechCloud();
+          }),
+      );
+    addInfo(cloudModel, "支持风格指令的模型（如 mini-tts 系列）可通过下方「风格指令」控制语气、断句与停顿。");
+
+    const cloudVoice = new Setting(containerEl)
+      .setName("云端音色")
+      .addText((text) =>
+        text
+          .setPlaceholder("alloy")
+          .setValue(settings.cloudTtsVoice)
+          .onChange((value) => {
+            plugin.store.updateSettings({
+              cloudTtsVoice: value.trim() || settings.cloudTtsVoice,
+            });
+            plugin.refreshSpeechCloud();
+          }),
+      );
+    addInfo(cloudVoice, "填服务提供商支持的音色名；不同服务商可选值不同，详见其文档。");
+
+    const cloudStyle = new Setting(containerEl)
+      .setName("风格指令")
+      .addText((text) =>
+        text
+          .setPlaceholder("自然、平和的普通话")
+          .setValue(settings.cloudTtsStyle)
+          .onChange((value) => {
+            plugin.store.updateSettings({ cloudTtsStyle: value });
+            plugin.refreshSpeechCloud();
+          }),
+      );
+    addInfo(cloudStyle, "作为 instructions 传给模型，用来要求自然断句、疑问句尾音、长句停顿等；不支持该字段的服务商会忽略。");
+
     const rate = new Setting(containerEl)
       .setName("朗读语速")
       .addText((text) =>
@@ -258,7 +352,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       );
     addInfo(
       rate,
-      "用系统自带的语音合成朗读笔记，语速范围 0.5–3，默认 1。改动会立即作用于正在朗读的当前分块，并随插件数据持久化。",
+      "系统语音与云端语音共用的基准语速，范围 0.5–3，默认 1。规则式韵律会在此基础上按句群做小幅浮动；改动会立即作用于当前分块。",
     );
 
     const voice = new Setting(containerEl)
@@ -291,6 +385,50 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       "默认关闭，避免打开笔记时意外发声。开启后，若该笔记有未读完的断点，原文窗口会自动接着朗读；否则一律手动点「从断点续读」。断点按笔记路径保存，重命名时会自动迁移。",
     );
 
+    const prosody = new Setting(containerEl)
+      .setName("自然韵律优化")
+      .addToggle((toggle) =>
+        toggle.setValue(settings.speechProsody).onChange((value) => {
+          plugin.store.updateSettings({ speechProsody: value });
+          plugin.speech.setProsody(value);
+          feedback.setText(value ? "已开启句群分块、停顿与动态语气。" : "已关闭韵律优化，恢复逐标点分块。");
+        }),
+      );
+    addInfo(
+      prosody,
+      "方案 A：句群分块（不再每个逗号都断）、句末停顿、动态语速与音高、Natural / Neural 音色优选。系统级参数合成能明显改善断句与节奏，但达不到神经网络 TTS 的真人语气；后者请开启云端神经语音。",
+    );
+
+    const pause = new Setting(containerEl)
+      .setName("句间停顿上限（毫秒）")
+      .addText((text) =>
+        text
+          .setPlaceholder("420")
+          .setValue(String(settings.speechPauseMs))
+          .onChange((value) => {
+            const parsed = Number.parseInt(value, 10);
+            const next = Number.isFinite(parsed) && parsed >= 0 ? Math.min(1200, parsed) : settings.speechPauseMs;
+            plugin.store.updateSettings({ speechPauseMs: next });
+            plugin.speech.setMaxPauseMs(next);
+          }),
+      );
+    addInfo(pause, "每个句群读完后的停顿，按标点动态调整（句号 280ms、疑问 / 感叹 340ms、省略号 420ms），不超过此处上限。设为 0 关闭停顿。");
+
+    const voicePick = new Setting(containerEl)
+      .setName("系统音色")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("", "自动（中文 / Natural 优先）");
+        for (const voice of plugin.speech.listVoices()) {
+          dropdown.addOption(voice.name, `${voice.name} · ${voice.lang}`);
+        }
+        dropdown.setValue(settings.speechVoiceName).onChange((value) => {
+          plugin.store.updateSettings({ speechVoiceName: value });
+          plugin.speech.setManualVoiceName(value);
+          feedback.setText(value ? `已固定使用音色：${value}` : "已恢复自动优选音色。");
+        });
+      });
+    addInfo(voicePick, "系统音色列表由设备提供；Android WebView 通常为空。留空时自动挑选 zh-CN 且名字含 Natural / Neural 的高质量音色。");
+
     const speechState = new Setting(containerEl)
       .setName("朗读能力")
       .addButton((button) =>
@@ -301,18 +439,19 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       );
     const speechSnapshot = plugin.speech.getSnapshot();
     speechState.setDesc(
-      speechSnapshot.supported
-        ? "当前设备支持系统语音合成。手机端若无声音会自动降级并给出中文提示。"
-        : "当前设备不支持朗读，可在桌面端使用；原文窗口会隐藏朗读按钮并给出提示。",
+      `当前引擎：${speechSnapshot.engineLabel}。` +
+        (speechSnapshot.supported
+          ? "云端不可用时自动回退系统语音（规则式韵律）。"
+          : "Android WebView 通常没有系统语音，请开启云端神经语音或使用朗读稿替代路径。"),
     );
     addInfo(
       speechState,
-      "朗读在笔记原文窗口顶部控制：朗读 / 暂停 / 停止 / 可拖动进度条，关闭窗口自动保存断点。插件卸载或禁用时会 cancel 语音并清除全部定时器。手机端朗读可能不可用。",
+      "朗读在笔记原文窗口顶部控制：朗读 / 暂停 / 停止 / 可拖动进度条，关闭窗口自动保存断点。设备无语音时窗口会提供「复制朗读稿」「保存朗读稿到库内」，可交给系统「随选朗读」。插件卸载或禁用时会 cancel 语音并清除全部定时器。",
     );
 
     containerEl.createDiv({
       cls: "kw-ver",
-      text: `知识管理工作台 v${plugin.manifest.version} · 纯本地 vault 数据`,
+      text: `知识管理工作台 v${plugin.manifest.version} · 默认零网络请求 · 云端朗读为可选功能`,
     });
   }
 }

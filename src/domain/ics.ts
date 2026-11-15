@@ -78,6 +78,21 @@ export function toIcsDate(date: string): string {
 }
 
 /**
+ * 全天事件的 DTEND 必须是「次日」且为排他结束值。
+ * Outlook / Microsoft Graph 对缺失 DTEND 或 DURATION 的 VEVENT 会直接拒绝解析。
+ */
+export function nextIcsDate(date: string): string {
+  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(date);
+  if (!match) return date;
+  const day = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
+  day.setUTCDate(day.getUTCDate() + 1);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${day.getUTCFullYear()}${pad(day.getUTCMonth() + 1)}${pad(day.getUTCDate())}`;
+}
+
+/**
  * 逾期项把 DTSTART 设为今天（否则系统日历不会再提醒），
  * 原定日期与逾期天数保留在 DESCRIPTION 中；其余用原始日期。
  */
@@ -111,13 +126,19 @@ export function renderIcs(events: IcsEvent[], generatedAt = new Date()): string 
     "PRODID:-//knowledge-workbench//zh-CN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
+    "X-WR-CALNAME:知识管理工作台提醒",
   ];
   for (const event of events) {
     lines.push(
       "BEGIN:VEVENT",
       `UID:${event.uid}`,
       `DTSTAMP:${stamp}`,
+      "SEQUENCE:0",
+      "STATUS:CONFIRMED",
       `DTSTART;VALUE=DATE:${event.date}`,
+      `DTEND;VALUE=DATE:${nextIcsDate(event.date)}`,
+      "X-MICROSOFT-CDO-ALLDAYEVENT:TRUE",
+      "X-MICROSOFT-CDO-BUSYSTATUS:FREE",
       `SUMMARY:${escapeIcsText(event.summary)}`,
       `DESCRIPTION:${escapeIcsText(event.description)}`,
       "TRANSP:TRANSPARENT",

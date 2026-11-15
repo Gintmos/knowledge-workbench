@@ -8,6 +8,9 @@ import {
   filterPaths,
   groupToday,
   isTab,
+  decodeSelection,
+  encodeSelection,
+  normalizeTabDetail,
   readCategory,
   restoreViewState,
   sortHistory,
@@ -72,12 +75,13 @@ function slices(counts: number[]): ChartSlice[] {
   }));
 }
 
-test("四个页签顺序固定且都有中文文案", () => {
-  assert.deepEqual(TAB_ORDER, ["today", "knowledge", "review", "stats"]);
+test("四个页签顺序固定：知识库已取消、浏览历史在最右", () => {
+  assert.deepEqual(TAB_ORDER, ["today", "review", "stats", "history"]);
   for (const tab of TAB_ORDER) {
     assert.ok(TAB_LABELS[tab].length > 0);
   }
-  assert.equal(isTab("review"), true);
+  assert.equal(isTab("history"), true);
+  assert.equal(isTab("knowledge"), false);
   assert.equal(isTab("unknown"), false);
   assert.equal(isTab(42), false);
 });
@@ -138,12 +142,17 @@ test("同一天恢复页签、滚动位置与分类筛选", () => {
     day: "2026-11-15",
     tab: "stats",
     scrollY: 240,
-    tabDetail: { knowledgeCategory: "项目" },
+    tabDetail: { statsCategory: "category::项目", knowledgeCategory: "梦境" },
   });
   const restored = restoreViewState(raw, "2026-11-15");
   assert.equal(restored.tab, "stats");
   assert.equal(restored.scrollY, 240);
-  assert.equal(readCategory(restored.tabDetail), "项目");
+  assert.equal(readCategory(restored.tabDetail), "category::项目");
+  assert.equal(
+    restored.tabDetail["knowledgeCategory"],
+    undefined,
+    "旧知识库页签的坏死筛选值必须被清除",
+  );
 });
 
 test("跨天重置视图，非法页签与负滚动位置有兜底", () => {
@@ -153,7 +162,7 @@ test("跨天重置视图，非法页签与负滚动位置有兜底", () => {
     scrollY: -50,
     lastModal: "a.md",
     note: { path: "a.md", title: "a" },
-    tabDetail: { knowledgeCategory: "项目" },
+    tabDetail: { statsCategory: "category::项目" },
   });
   const reset = restoreViewState(raw, "2026-11-15");
   assert.equal(reset.day, "2026-11-15");
@@ -174,7 +183,15 @@ test("分类筛选读写与清除", () => {
   const cleared = writeCategory(detail, null);
   assert.equal(readCategory(cleared), null);
   assert.deepEqual(cleared, {});
-  assert.equal(readCategory({ knowledgeCategory: 3 }), null);
+  assert.equal(readCategory({ statsCategory: 3 }), null);
+  assert.deepEqual(encodeSelection({ scope: "detail", key: "#项目" }), "detail::#项目");
+  assert.deepEqual(decodeSelection("detail::#项目"), {
+    scope: "detail",
+    key: "#项目",
+  });
+  assert.equal(decodeSelection("梦境"), null, "旧格式脏值不得恢复为选中项");
+  assert.equal(decodeSelection(null), null);
+  assert.deepEqual(normalizeTabDetail({ knowledgeCategory: "梦境", other: 1 }), { other: 1 });
 });
 
 test("filterPaths 不筛选时返回 null，未知分类返回空集合", () => {
@@ -191,9 +208,12 @@ test("标签按槽宽截断，末尾省略号且不超过可用字符数", () =>
   assert.equal(truncateLabel("超长", 1), "超");
 });
 
-test("柱状图几何：柱数 ≤ 10、坐标有限、柱底对齐基线", () => {
+test("全量柱状图几何：所有分类都出柱、坐标有限、柱底对齐基线", () => {
   const geo = chartGeometry(slices([9, 7, 5, 4, 3, 2, 2, 1, 1, 1, 1, 1]));
-  assert.equal(geo.bars.length, CHART_LIMIT);
+  assert.equal(geo.bars.length, 12, "不再归并 Top 10 / 其他");
+  assert.equal(geo.totalSlices, 12);
+  assert.equal(geo.truncated, false);
+  assert.ok(geo.width >= 12 * 62, "宽度按类别数扩展，由容器横向滚动");
   const plotBottom = geo.plotBottom;
   for (const bar of geo.bars) {
     assert.ok(Number.isFinite(bar.x) && Number.isFinite(bar.y));
@@ -224,7 +244,7 @@ test("柱状图标签不重叠：估算宽度 ≤ slot-gap，中心间距 = slot
   }
 });
 
-test("结合 chartSlices：12 类只画 10 根柱子，计数总和仍守恒", () => {
+test("旧版有限图表 chartSlices 仍压缩为 10 柱，计数总和守恒", () => {
   const notes: NoteRecord[] = [];
   for (let i = 0; i < 12; i += 1) {
     for (let j = 0; j <= i; j += 1) {

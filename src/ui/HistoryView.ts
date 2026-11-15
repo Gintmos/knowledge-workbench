@@ -3,12 +3,13 @@ import type { HistoryEntry } from "../types";
 
 /**
  * 浏览历史：由宿主的 file-open 自动采集，最新在前、同一路径去重、最多 20 篇。
- * 标题即链接，点击后交给视图打开统一 Markdown 弹窗。
+ * 独立页签；标题打开带朗读的 Markdown 弹窗，同行按钮直达 vault 原文。
  */
 export class HistoryView {
   constructor(
     private readonly parent: HTMLElement,
-    private readonly onOpen: (path: string, title: string) => void,
+    private readonly onOpen: (path: string) => void,
+    private readonly onOpenOriginal: (path: string) => void,
   ) {}
 
   render(entries: HistoryEntry[]): void {
@@ -35,8 +36,13 @@ export class HistoryView {
       link.setAttr("href", "#");
       link.addEventListener("click", (event: MouseEvent) => {
         event.preventDefault();
-        this.onOpen(entry.path, entry.title);
+        this.onOpen(entry.path);
       });
+      const open = row.createEl("button", {
+        cls: "kw-open-btn",
+        text: "打开原文",
+      });
+      open.addEventListener("click", () => this.onOpenOriginal(entry.path));
       row.createDiv({
         cls: "kw-note-meta",
         text: `${new Date(entry.at).toLocaleString("zh-CN")} · ${entry.path}`,

@@ -1,7 +1,11 @@
 /**
- * P5 分块队列（纯函数）：v14 的 splitSpeechChunks() 近原样移植。
- * Chromium 的 speechSynthesis 对超长 utterance 会静默停止，因此按标点优先切块，
- * 每块不超过 maxLen 个字符；块与块之间由 SP 状态机串行播放。
+ * 朗读分块（纯函数）：按「句群」而不是按每个逗号切分，避免机械的碎句连读。
+ *
+ * v1.0.1 韵律优化：
+ * - 只在句末标点与换行处切句，逗号 / 顿号 / 冒号保留在句内；
+ * - 相邻短句合并成一个 ≤ maxLen 的句群，用中文标点自然连接（不再用 ASCII 空格）；
+ * - 超长句优先在最近的次级标点处断开，绝不从词中间硬切；
+ * - 每块附带 pauseMs / rateScale / pitch，由服务层交给引擎注入停顿与语气。
  */
 import { mdToSpeechText } from "./speechText";
 
@@ -12,6 +16,12 @@ export interface SpeechChunk {
   /** 在清洗后文本中的字符偏移，仅用于进度与测试校验。 */
   start: number;
   end: number;
+  /** 本块读完后建议的停顿（毫秒）。 */
+  pauseMs: number;
+  /** 本块语速倍率。 */
+  rateScale: number;
+  /** 本块音高。 */
+  pitch: number;
 }
 
 interface Piece {
@@ -20,10 +30,16 @@ interface Piece {
   end: number;
 }
 
-// 句读符号优先作为切分点；换行与空白不进入朗读文本。
-const BREAK = /[。！？!?；;：:，,、…]/;
+/** 句末标点：在这里断句；逗号、顿号、冒号属于句内停顿，不切。 */
+const TERMINAL = /[。！？!?…；;]/;
+const SOFT = /[，,、：:]/;
 
-function toPieces(text: string): Piece[] {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** 句末标点 / 换行切句，保留标点本身，保证拼接后不丢字。 */
+function toSentences(text: string): Piece[] {
   const pieces: Piece[] = [];
   let buffer = "";
   let start = -1;
@@ -41,17 +57,6 @@ function toPieces(text: string): Piece[] {
       if (start >= 0) flush(i + 1);
       continue;
     }
-    if (BREAK.test(char)) {
-      // 句首孤立标点也要保留，否则 chunksCoverText() 会判定「丢字」。
-      if (start < 0) {
-        start = i;
-        buffer = char;
-      } else {
-        buffer += char;
-      }
-      flush(i + 1);
-      continue;
-    }
     if (start < 0) {
       if (/\s/.test(char)) continue;
       start = i;
@@ -59,25 +64,78 @@ function toPieces(text: string): Piece[] {
     } else {
       buffer += char;
     }
+    if (TERMINAL.test(char)) flush(i + 1);
   }
   if (start >= 0) flush(text.length);
   return pieces;
 }
 
-function hardSplit(piece: Piece, maxLen: number): SpeechChunk[] {
-  const result: SpeechChunk[] = [];
-  for (let offset = 0; offset < piece.text.length; offset += maxLen) {
+/** 超长句在最近的次级标点处断开，尽量不切断词语。 */
+function splitLong(piece: Piece, limit: number): Piece[] {
+  if (piece.text.length <= limit) return [piece];
+  const result: Piece[] = [];
+  let rest = piece;
+  while (rest.text.length > limit) {
+    let cut = -1;
+    for (let i = Math.min(limit, rest.text.length) - 1; i > 0; i -= 1) {
+      if (SOFT.test(rest.text[i]) || TERMINAL.test(rest.text[i])) {
+        cut = i + 1;
+        break;
+      }
+    }
+    if (cut < 0) cut = limit;
     result.push({
-      text: piece.text.slice(offset, offset + maxLen),
-      start: piece.start + offset,
-      end: Math.min(piece.end, piece.start + offset + maxLen),
+      text: rest.text.slice(0, cut),
+      start: rest.start,
+      end: Math.min(rest.end, rest.start + cut),
     });
+    rest = {
+      text: rest.text.slice(cut),
+      start: rest.start + cut,
+      end: rest.end,
+    };
   }
+  if (rest.text) result.push(rest);
   return result;
 }
 
+/** 依据句末标点与语气给出停顿、语速与音高。 */
+export function prosodyFor(text: string): {
+  pauseMs: number;
+  rateScale: number;
+  pitch: number;
+} {
+  const chars = [...text];
+  const last = chars.reverse().find((ch) => /[。！？!?…；;，,、：:]/.test(ch)) ?? "";
+  let pauseMs = 160;
+  if (/[！？!?…]/.test(last)) pauseMs = 340;
+  else if (/[。]/.test(last)) pauseMs = 280;
+  else if (/[；;]/.test(last)) pauseMs = 240;
+  else if (SOFT.test(last)) pauseMs = 190;
+  if (/…/.test(last)) pauseMs = 420;
+
+  const question = /[？?]/.test(text);
+  const exclaim = /[！!]/.test(text);
+  const rateScale = clamp(
+    1 + (exclaim ? -0.03 : 0) + (question ? -0.02 : 0) + (text.length > 100 ? 0.02 : 0),
+    0.9,
+    1.1,
+  );
+  const pitch = clamp(1 + (question ? 0.07 : 0) + (exclaim ? 0.05 : 0), 0.92, 1.12);
+  return { pauseMs, rateScale, pitch };
+}
+
+function toChunk(piece: Piece): SpeechChunk {
+  return {
+    text: piece.text,
+    start: piece.start,
+    end: piece.end,
+    ...prosodyFor(piece.text),
+  };
+}
+
 /**
- * 把纯文本切成 <= maxLen 的块。
+ * 把纯文本切成 <= maxLen 的句群。
  * 保证：去掉所有空白后，拼接结果与原文本完全一致（不丢字、不重复）。
  */
 export function splitSpeechChunks(
@@ -85,34 +143,29 @@ export function splitSpeechChunks(
   maxLen: number = SPEECH_CHUNK_LIMIT,
 ): SpeechChunk[] {
   const limit = Math.max(1, Math.floor(maxLen));
+  const sentences = toSentences(text).flatMap((piece) => splitLong(piece, limit));
   const chunks: SpeechChunk[] = [];
-  let current: SpeechChunk | null = null;
+  let current: Piece | null = null;
 
-  const pushCurrent = (): void => {
-    if (current) {
-      chunks.push(current);
-      current = null;
-    }
+  const push = (): void => {
+    if (current) chunks.push(toChunk(current));
+    current = null;
   };
 
-  for (const piece of toPieces(text)) {
-    if (piece.text.length > limit) {
-      pushCurrent();
-      chunks.push(...hardSplit(piece, limit));
-      continue;
-    }
-    if (current && current.text.length + 1 + piece.text.length <= limit) {
+  for (const sentence of sentences) {
+    // 中文句群直接相连，标点本身就是停顿；不再插入 ASCII 空格。
+    if (current && current.text.length + sentence.text.length <= limit) {
       current = {
-        text: `${current.text} ${piece.text}`,
+        text: `${current.text}${sentence.text}`,
         start: current.start,
-        end: piece.end,
+        end: sentence.end,
       };
     } else {
-      pushCurrent();
-      current = { text: piece.text, start: piece.start, end: piece.end };
+      push();
+      current = { ...sentence };
     }
   }
-  pushCurrent();
+  push();
   return chunks;
 }
 

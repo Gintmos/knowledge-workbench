@@ -58,7 +58,7 @@ const mainTs = read(join(SRC, "main.ts"));
 const forbidden = [
   ["innerHTML / outerHTML / insertAdjacentHTML", /\.innerHTML|\.outerHTML|\.insertAdjacentHTML/],
   ["Node / Electron 模块导入与 require()", /\brequire\s*\(|from\s+["'](?:node:)?(?:fs|path|os|electron|child_process|crypto)["']/],
-  ["网络请求 fetch / XMLHttpRequest / requestUrl / WebSocket", /\bfetch\s*\(|XMLHttpRequest|requestUrl\s*\(|new\s+WebSocket|sendBeacon/],
+  ["网络请求 fetch / XMLHttpRequest / WebSocket / sendBeacon", /\bfetch\s*\(|XMLHttpRequest|new\s+WebSocket|sendBeacon/],
   ["浏览器持久化 API showDirectoryPicker / IndexedDB / localStorage", /showDirectoryPicker|indexedDB|localStorage|sessionStorage/],
   ["动态代码 eval / new Function", /\beval\s*\(|new\s+Function\s*\(/],
   ["硬编码外部 URL（零网络请求约束）", /https?:\/\//],
@@ -70,6 +70,21 @@ for (const [name, pattern] of forbidden) {
   const hits = findInSources(sourceFiles, pattern);
   check("移动端与运行时", name, hits.length === 0, hits.join(" | "));
 }
+// 可选云端神经 TTS 是唯一允许联网的路径：必须集中在 speech/cloud.ts，且默认关闭。
+const cloudFile = join(SRC, "speech", "cloud.ts");
+const requestUrlHits = findInSources(
+  sourceFiles.filter((file) => file !== cloudFile),
+  /requestUrl\s*\(/,
+);
+check("移动端与运行时", "requestUrl 仅存在于云端朗读适配层", requestUrlHits.length === 0, requestUrlHits.join(" | "));
+const typesTs = read(join(SRC, "types.ts"));
+check(
+  "移动端与运行时",
+  "云端朗读默认关闭且地址/密钥留空",
+  /cloudTtsEnabled:\s*false/.test(typesTs) && /cloudTtsUrl:\s*""/.test(typesTs) && /cloudTtsKey:\s*""/.test(typesTs),
+  "DEFAULT_SETTINGS",
+);
+check("移动端与运行时", "云端适配层存在且使用宿主 requestUrl", /requestUrl\s*\(/.test(read(cloudFile)), cloudFile);
 
 // 全局 app：先剔除 this.app / xxx.app，再找裸 app.vault 等。
 const globalAppHits = [];
@@ -143,7 +158,12 @@ for (const file of ["main.js", "manifest.json", "styles.css", "versions.json", "
 const readme = read(join(ROOT, "README.md"));
 check("发布材料", "README 写明关 App 后不推送 / 用 .ics", /\.ics/.test(readme) && /(不推送|不再提醒|系统日历)/.test(readme));
 check("发布材料", "README 写明手机端朗读可能不可用", /手机|移动端/.test(readme) && /朗读/.test(readme));
-check("发布材料", "README 声明零网络请求 / 隐私", /零网络|无网络|不联网/.test(readme));
+check("发布材料", "README 声明默认零网络请求 / 隐私", /零网络|无网络|不联网/.test(readme));
+check(
+  "发布材料",
+  "README 披露可选云端朗读与数据发送范围",
+  /云端/.test(readme) && /(仅发送|只发送|不发送)/.test(readme),
+);
 
 // ── 6. 输出 ───────────────────────────────────────────────────
 const failed = results.filter((r) => !r.ok);

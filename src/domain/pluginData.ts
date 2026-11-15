@@ -9,8 +9,9 @@ import {
   type WorkbenchSettings,
   type WorkbenchTab,
 } from "../types";
+import { normalizeTabDetail } from "./uiModel";
 
-const TABS: WorkbenchTab[] = ["today", "knowledge", "review", "stats"];
+const TABS: WorkbenchTab[] = ["today", "review", "stats", "history"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -47,6 +48,32 @@ export function normalizeSettings(raw: unknown): WorkbenchSettings {
       typeof source["speechAutoResume"] === "boolean"
         ? source["speechAutoResume"]
         : DEFAULT_SETTINGS.speechAutoResume,
+    speechProsody:
+      typeof source["speechProsody"] === "boolean"
+        ? source["speechProsody"]
+        : DEFAULT_SETTINGS.speechProsody,
+    speechVoiceName:
+      typeof source["speechVoiceName"] === "string"
+        ? source["speechVoiceName"]
+        : DEFAULT_SETTINGS.speechVoiceName,
+    speechPauseMs: Math.min(
+      1200,
+      Math.max(0, Math.floor(finiteNumber(source["speechPauseMs"], DEFAULT_SETTINGS.speechPauseMs))),
+    ),
+    cloudTtsEnabled:
+      typeof source["cloudTtsEnabled"] === "boolean"
+        ? source["cloudTtsEnabled"]
+        : DEFAULT_SETTINGS.cloudTtsEnabled,
+    cloudTtsUrl:
+      typeof source["cloudTtsUrl"] === "string" ? source["cloudTtsUrl"] : DEFAULT_SETTINGS.cloudTtsUrl,
+    cloudTtsKey:
+      typeof source["cloudTtsKey"] === "string" ? source["cloudTtsKey"] : DEFAULT_SETTINGS.cloudTtsKey,
+    cloudTtsModel: nonEmptyString(source["cloudTtsModel"], DEFAULT_SETTINGS.cloudTtsModel),
+    cloudTtsVoice: nonEmptyString(source["cloudTtsVoice"], DEFAULT_SETTINGS.cloudTtsVoice),
+    cloudTtsStyle:
+      typeof source["cloudTtsStyle"] === "string"
+        ? source["cloudTtsStyle"]
+        : DEFAULT_SETTINGS.cloudTtsStyle,
     writeSummaryToFrontmatter:
       typeof source["writeSummaryToFrontmatter"] === "boolean"
         ? source["writeSummaryToFrontmatter"]
@@ -102,7 +129,17 @@ export function normalizeData(raw: unknown): PluginData {
   if (!isRecord(raw)) return base;
   const view = isRecord(raw["view"]) ? raw["view"] : {};
   const note = isRecord(view["note"]) ? view["note"] : null;
-  const tab = view["tab"];
+  const rawTab = view["tab"];
+  // 旧「知识库」页签映射到「统计」；旧的坏死筛选值一并丢弃。
+  const tab: WorkbenchTab =
+    rawTab === "knowledge"
+      ? "stats"
+      : TABS.includes(rawTab as WorkbenchTab)
+        ? (rawTab as WorkbenchTab)
+        : base.view.tab;
+  const tabDetail = normalizeTabDetail(
+    isRecord(view["tabDetail"]) ? view["tabDetail"] : {},
+  );
   return {
     version: DATA_VERSION,
     view: {
@@ -110,7 +147,7 @@ export function normalizeData(raw: unknown): PluginData {
         typeof view["day"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(view["day"])
           ? view["day"]
           : base.view.day,
-      tab: TABS.includes(tab as WorkbenchTab) ? (tab as WorkbenchTab) : base.view.tab,
+      tab,
       scrollY: Math.max(0, finiteNumber(view["scrollY"], 0)),
       lastModal: typeof view["lastModal"] === "string" ? view["lastModal"] : null,
       note:
@@ -120,7 +157,7 @@ export function normalizeData(raw: unknown): PluginData {
               title: typeof note["title"] === "string" ? note["title"] : note["path"],
             }
           : null,
-      tabDetail: isRecord(view["tabDetail"]) ? view["tabDetail"] : {},
+      tabDetail,
       mdView: typeof view["mdView"] === "boolean" ? view["mdView"] : false,
     },
     read: normalizeRead(raw["read"]),

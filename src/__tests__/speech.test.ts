@@ -93,13 +93,15 @@ test("清洗规则共用：P3 摘要仍跳过表格行，P5 朗读保留表格�
   assert.equal(cleanMarkdownLine("| :--- | ---: |", { keepTableRows: true }), "");
 });
 
-test("分块：标点优先、不超过上限、拼接后不丢字不重复", () => {
+test("分块：句群合并、不超过上限、拼接后不丢字不重复", () => {
   assert.deepEqual(splitSpeechChunks(""), []);
   assert.deepEqual(splitSpeechChunks("   \n  "), []);
   const short = splitSpeechChunks("这是第一句。这是第二句！", 160);
   assert.equal(short.length, 1);
-  assert.equal(short[0].text, "这是第一句。 这是第二句！");
+  assert.equal(short[0].text, "这是第一句。这是第二句！", "不再用 ASCII 空格拼接碎句");
   assert.equal(short[0].start, 0);
+  assert.ok(short[0].pauseMs >= 280, "感叹句应有更长停顿");
+  assert.ok(short[0].pitch > 1, "感叹 / 疑问句音高上扬");
 
   const long = "中文朗读内容".repeat(90) + "。";
   const chunks = splitSpeechChunks(long, 60);
@@ -114,6 +116,8 @@ test("分块：标点优先、不超过上限、拼接后不丢字不重复", ()
 
 test("分块：孤立句首标点不丢字，md → 分块覆盖全文", () => {
   assert.ok(chunksCoverText("，你好。", splitSpeechChunks("，你好。")));
+  const comma = splitSpeechChunks("先说前半句，再说后半句，最后收尾。", 160);
+  assert.equal(comma.length, 1, "逗号 / 顿号不再切断句群");
   const text = mdToSpeechText(REAL_NOTE);
   const chunks = mdToSpeechChunks(REAL_NOTE);
   assert.ok(chunks.length >= 1);

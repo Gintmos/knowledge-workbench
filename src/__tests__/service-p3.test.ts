@@ -153,7 +153,13 @@ test("WorkbenchService：93 条基线聚合、Top 10 与 .ics 写入 vault", asy
     "逐篇统计不设上限",
   );
   assert.ok(snapshot.categories.length > 10);
-  assert.ok(snapshot.chart.length <= 10);
+  assert.equal(
+    snapshot.chart.length,
+    snapshot.categories.length,
+    "统计卡片使用全量柱状图，不归并其他",
+  );
+  assert.ok(snapshot.detailChart.length > 0, "标签 / 文件夹卡片也有可点击切片");
+  assert.ok(snapshot.chart.every((slice) => slice.paths.length === slice.count));
   assert.ok(snapshot.today.total >= 3);
   assert.ok(snapshot.today.overdue.length >= 1);
   assert.ok(snapshot.today.review.length >= 1);

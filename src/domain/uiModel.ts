@@ -1,5 +1,6 @@
 import {
-  CHART_LIMIT,
+  CHART_MAX_BARS,
+  CHART_MIN_SLOT,
   HISTORY_LIMIT,
   type ChartSlice,
   type HistoryEntry,
@@ -9,14 +10,14 @@ import {
   type WorkbenchTab,
 } from "../types";
 
-/** 四个正式页签的顺序与文案，视图与单测共用同一份定义。 */
-export const TAB_ORDER: WorkbenchTab[] = ["today", "knowledge", "review", "stats"];
+/** 四个正式页签：知识库已取消，浏览历史独立成最右页签。 */
+export const TAB_ORDER: WorkbenchTab[] = ["today", "review", "stats", "history"];
 
 export const TAB_LABELS: Record<WorkbenchTab, string> = {
   today: "今日要处理",
-  knowledge: "知识库",
   review: "复习",
   stats: "统计",
+  history: "浏览历史",
 };
 
 export const KIND_LABEL: Record<TodayKind, string> = {
@@ -78,7 +79,7 @@ export function restoreViewState(view: ViewState, today: string): ViewState {
       ...view,
       tab: isTab(view.tab) ? view.tab : "today",
       scrollY: Number.isFinite(view.scrollY) ? Math.max(0, view.scrollY) : 0,
-      tabDetail: view.tabDetail ?? {},
+      tabDetail: normalizeTabDetail(view.tabDetail ?? {}),
     };
   }
   return {
@@ -92,7 +93,37 @@ export function restoreViewState(view: ViewState, today: string): ViewState {
   };
 }
 
-const CATEGORY_KEY = "knowledgeCategory";
+/** 升级时清除旧「知识库」页签遗留的筛选值，避免坏死状态被恢复。 */
+export function normalizeTabDetail(
+  detail: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...detail };
+  delete next["knowledgeCategory"];
+  return next;
+}
+
+const CATEGORY_KEY = "statsCategory";
+export type ChartScope = "category" | "detail";
+
+export interface ChartSelection {
+  scope: ChartScope;
+  key: string;
+}
+
+/** 两张卡片的选中项共用一个持久化字段，用 scope 前缀区分。 */
+export function encodeSelection(selection: ChartSelection): string {
+  return `${selection.scope}::${selection.key}`;
+}
+
+export function decodeSelection(value: string | null): ChartSelection | null {
+  if (!value) return null;
+  const at = value.indexOf("::");
+  if (at < 0) return null;
+  const scope = value.slice(0, at);
+  const key = value.slice(at + 2);
+  if ((scope !== "category" && scope !== "detail") || !key) return null;
+  return { scope, key };
+}
 
 export function readCategory(detail: Record<string, unknown>): string | null {
   const value = detail[CATEGORY_KEY];
@@ -122,6 +153,10 @@ export function filterPaths(
 export interface ChartOptions {
   width?: number;
   height?: number;
+  /** 全量模式下每根柱子的最小槽宽；总宽超过容器时由 CSS 横向滚动。 */
+  minSlot?: number;
+  /** 防御上限，避免极端库生成超大 SVG。 */
+  maxBars?: number;
   padX?: number;
   padTop?: number;
   padBottom?: number;
@@ -150,6 +185,8 @@ export interface ChartGeometry {
   max: number;
   slot: number;
   bars: BarGeometry[];
+  totalSlices: number;
+  truncated: boolean;
 }
 
 /** 标签按可用槽宽截断，末尾用省略号，绝不与相邻柱子标签重叠。 */
@@ -161,23 +198,30 @@ export function truncateLabel(key: string, maxChars: number): string {
 }
 
 /**
- * 内联 SVG 柱状图的几何计算（纯函数，不接触 DOM）。
+ * 全量柱状图的几何计算（纯函数，不接触 DOM）。
+ * 所有分类都出柱；宽度按 minSlot × 类别数扩展，由外层容器横向滚动查看。
  * 文字不重叠的保证：每个标签的估算宽度 ≤ slot - gap，且标签中心间距 = slot。
  */
 export function chartGeometry(
   slices: ChartSlice[],
   options: ChartOptions = {},
 ): ChartGeometry {
-  const width = Math.max(120, options.width ?? 320);
   const height = Math.max(100, options.height ?? 190);
   const padX = options.padX ?? 12;
   const padTop = options.padTop ?? 26;
   const padBottom = options.padBottom ?? 42;
   const gap = options.gap ?? 8;
   const charWidth = options.charWidth ?? 9;
+  const minSlot = Math.max(24, options.minSlot ?? CHART_MIN_SLOT);
+  const maxBars = Math.max(1, options.maxBars ?? CHART_MAX_BARS);
 
-  const limited = slices.slice(0, CHART_LIMIT);
+  const limited = slices.slice(0, maxBars);
   const count = Math.max(1, limited.length);
+  const width = Math.max(
+    120,
+    options.width ?? 320,
+    limited.length * minSlot + padX * 2,
+  );
   const plotBottom = height - padBottom;
   const plotHeight = Math.max(1, plotBottom - padTop);
   const plotWidth = Math.max(1, width - padX * 2);
@@ -204,7 +248,16 @@ export function chartGeometry(
     };
   });
 
-  return { width, height, plotBottom, max, slot, bars };
+  return {
+    width,
+    height,
+    plotBottom,
+    max,
+    slot,
+    bars,
+    totalSlices: slices.length,
+    truncated: slices.length > limited.length,
+  };
 }
 
 // ── P6：明细列表懒渲染 ────────────────────────────────────────

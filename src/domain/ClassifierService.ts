@@ -65,8 +65,60 @@ export function folderCounts(notes: NoteRecord[]): CategoryCount[] {
 }
 
 /**
- * 仅用于柱状图：最多 limit 根柱子，长尾统一归入「其他」。
- * 不影响 countByCategory 的逐篇统计，也不裁剪知识条目。
+ * 全量主分类切片（不归并「其他」），供统计卡片的可滚动柱状图与下钻清单使用。
+ */
+export function allCategorySlices(
+  notes: NoteRecord[],
+  mode: ClassifyBy,
+): ChartSlice[] {
+  return [...groupByCategory(notes, mode).entries()]
+    .map(([key, paths]) => ({ key, count: paths.length, paths }))
+    .sort((a, b) => b.count - a.count || cmp(a.key, b.key));
+}
+
+/** 每个标签（含层级）对应的笔记路径；列表显示名统一加 # 前缀。 */
+export function tagSlices(notes: NoteRecord[]): ChartSlice[] {
+  const groups = new Map<string, string[]>();
+  for (const note of notes) {
+    for (const tag of note.tags) {
+      const paths = groups.get(tag) ?? [];
+      paths.push(note.path);
+      groups.set(tag, paths);
+    }
+  }
+  return [...groups.entries()]
+    .map(([key, paths]) => ({ key, count: paths.length, paths }))
+    .sort((a, b) => b.count - a.count || cmp(a.key, b.key));
+}
+
+/** 首层文件夹对应的笔记路径。 */
+export function folderSlices(notes: NoteRecord[]): ChartSlice[] {
+  const groups = new Map<string, string[]>();
+  for (const note of notes) {
+    const key = folderOf(note.path);
+    const paths = groups.get(key) ?? [];
+    paths.push(note.path);
+    groups.set(key, paths);
+  }
+  return [...groups.entries()]
+    .map(([key, paths]) => ({ key, count: paths.length, paths }))
+    .sort((a, b) => b.count - a.count || cmp(a.key, b.key));
+}
+
+/** 「标签 / 文件夹」卡片：与列表行显示名完全一致的可点击切片。 */
+export function detailSlices(notes: NoteRecord[]): ChartSlice[] {
+  return [
+    ...tagSlices(notes).map((slice) => ({ ...slice, key: `#${slice.key}` })),
+    ...folderSlices(notes).map((slice) => ({
+      ...slice,
+      key: `目录 · ${slice.key}`,
+    })),
+  ];
+}
+
+/**
+ * 旧版有限柱状图：最多 limit 根柱子，长尾统一归入「其他」。
+ * 保留给需要压缩视图的调用方与历史基线单测；统计页已改用全量切片。
  */
 export function chartSlices(
   notes: NoteRecord[],

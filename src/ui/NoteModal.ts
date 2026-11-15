@@ -21,6 +21,8 @@ export interface NoteModalOptions {
   autoPlay?: boolean;
   /** 从设置读取：打开笔记时若有断点是否自动续读。 */
   autoResume?: () => boolean;
+  /** 把朗读稿保存到 vault，供 Android 系统朗读使用。 */
+  onExport?: (title: string, text: string) => void;
 }
 
 /**
@@ -35,6 +37,7 @@ export class NoteModal extends Modal {
   private readonly speech: SpeechService | null;
   private readonly autoPlay: boolean;
   private readonly autoResume: (() => boolean) | undefined;
+  private readonly onExport: ((title: string, text: string) => void) | undefined;
   private speechBar?: SpeechBar;
 
   constructor(app: App, file: TFile, options: NoteModalOptions = {}) {
@@ -43,6 +46,7 @@ export class NoteModal extends Modal {
     this.speech = options.speech ?? null;
     this.autoPlay = options.autoPlay ?? false;
     this.autoResume = options.autoResume;
+    this.onExport = options.onExport;
   }
 
   onOpen(): void {
@@ -54,6 +58,9 @@ export class NoteModal extends Modal {
         speech: this.speech,
         autoPlay: this.autoPlay,
         autoResume: this.autoResume,
+        onExport: this.onExport
+          ? (text) => this.onExport?.(this.file.basename, text)
+          : undefined,
       });
     }
     void this.renderBody();

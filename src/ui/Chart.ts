@@ -1,9 +1,16 @@
-import { chartGeometry, type ChartOptions } from "../domain/uiModel";
+import {
+  chartGeometry,
+  type ChartGeometry,
+  type ChartOptions,
+} from "../domain/uiModel";
 import type { ChartSlice } from "../types";
 
 /**
- * 内联 SVG 柱状图：零外部依赖，颜色全部由 styles.css 的主题变量提供。
- * 几何计算来自纯函数 chartGeometry，便于单测验证「文字不重叠、柱数 ≤ 10」。
+ * 内联 SVG 全量柱状图：零外部依赖，颜色全部由 styles.css 的主题变量提供。
+ * 几何计算来自纯函数 chartGeometry；所有分类都出柱，总宽超过容器时横向滚动。
+ *
+ * 关键规范：createSvg 的 cls 只能是单个类名（宿主内部用 classList.add，
+ * 含空格会抛 InvalidCharacterError 并中断整页渲染），多类名必须事后 add。
  */
 export function renderChart(
   parent: HTMLElement,
@@ -11,13 +18,19 @@ export function renderChart(
   activeKey: string | null,
   onSelect: (key: string | null) => void,
   options: ChartOptions = {},
-): void {
+): ChartGeometry {
   const geo = chartGeometry(slices, options);
   const svg = parent.createSvg("svg", { cls: "kw-chart" });
   svg.setAttribute("viewBox", `0 0 ${geo.width} ${geo.height}`);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `分类统计柱状图，共 ${geo.bars.length} 根柱子`);
+  svg.setAttribute(
+    "aria-label",
+    `全量分类柱状图，共 ${geo.bars.length} 根柱子，可横向滚动；点击柱子查看该分类笔记`,
+  );
+  // 明确像素宽度，避免 SVG 被容器压扁导致所有柱子挤在一起。
+  svg.style.width = `${geo.width}px`;
+  svg.style.height = `${geo.height}px`;
 
   const axis = svg.createSvg("line", { cls: "kw-chart-axis" });
   axis.setAttribute("x1", "0");
@@ -26,10 +39,11 @@ export function renderChart(
   axis.setAttribute("y2", String(geo.plotBottom));
 
   for (const bar of geo.bars) {
-    const cls = activeKey === bar.key ? "kw-chart-col is-active" : "kw-chart-col";
-    const group = svg.createSvg("g", { cls });
+    const group = svg.createSvg("g", { cls: "kw-chart-col" });
+    if (activeKey === bar.key) group.classList.add("is-active");
     group.setAttribute("role", "button");
     group.setAttribute("tabindex", "0");
+    group.setAttribute("aria-label", `${bar.key}，${bar.count} 篇，点击查看笔记清单`);
 
     const rect = group.createSvg("rect", { cls: "kw-chart-bar" });
     rect.setAttribute("x", String(bar.x));
@@ -39,7 +53,7 @@ export function renderChart(
     rect.setAttribute("rx", "2");
 
     const tip = group.createSvg("title");
-    tip.textContent = `${bar.key} · ${bar.count} 篇（点击筛选）`;
+    tip.textContent = `${bar.key} · ${bar.count} 篇（点击查看笔记清单）`;
 
     const value = group.createSvg("text", { cls: "kw-chart-value" });
     value.setAttribute("x", String(bar.centerX));
@@ -62,6 +76,7 @@ export function renderChart(
       }
     });
   }
+  return geo;
 }
 
 /**

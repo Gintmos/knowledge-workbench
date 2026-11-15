@@ -1,6 +1,6 @@
 {
   "name": "knowledge-workbench",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Obsidian plugin: vault-local knowledge classification, tasks, review plan and note reading. No backend, no network requests.",
   "scripts": {
@@ -12,6 +12,7 @@
     "link-vault": "node scripts/link-vault.mjs",
     "release:check": "node scripts/release-check.mjs",
     "benchmark": "node scripts/benchmark.mjs",
+    "ics:samples": "node scripts/ics-samples.mjs",
     "package": "npm run build && node scripts/package.mjs"
   },
   "devDependencies": {
