@@ -71,6 +71,14 @@ npm run package        # 构建并产出 dist/knowledge-workbench-<version>.zip
 npm run link-vault     # 复制到工作区内隔离的 test-vault
 ```
 
+**桌面端真机自动验收**（需先以调试端口启动 Obsidian：`Obsidian.exe --remote-debugging-port=9222 --remote-allow-origins=*`）：
+
+```bash
+node scripts/live-smoke.mjs        # 通过 CDP 跑 19 项检查，输出 dist/live-smoke.json
+```
+
+脚本只读验证插件启用、索引与快照、`.ics` 结构、四页签、折叠、笔记弹窗、主题变量、窄屏、朗读能力、控制台错误，并重建派生文件核对 UID 稳定；不修改笔记 frontmatter 与主题设置。明暗主题切换、真实发声、系统日历导入与手机端仍需人工走查。
+
 目录：`src/domain/` 纯函数（可单测）、`src/data/` 宿主服务、`src/speech/` 朗读纯函数与引擎、`src/ui/` 视图与设置、`src/__tests__/` 回归测试、`scripts/` 构建与发布脚本。
 
 ## 回滚
