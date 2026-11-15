@@ -70,13 +70,13 @@ for (const [name, pattern] of forbidden) {
   const hits = findInSources(sourceFiles, pattern);
   check("移动端与运行时", name, hits.length === 0, hits.join(" | "));
 }
-// 可选云端神经 TTS 是唯一允许联网的路径：必须集中在 speech/cloud.ts，且默认关闭。
+// v1.0.2：云端神经 TTS 已搁置。适配层保留在源码但未接线，产物严格零网络。
 const cloudFile = join(SRC, "speech", "cloud.ts");
 const requestUrlHits = findInSources(
   sourceFiles.filter((file) => file !== cloudFile),
   /requestUrl\s*\(/,
 );
-check("移动端与运行时", "requestUrl 仅存在于云端朗读适配层", requestUrlHits.length === 0, requestUrlHits.join(" | "));
+check("移动端与运行时", "requestUrl 仅存在于已搁置的云端适配层", requestUrlHits.length === 0, requestUrlHits.join(" | "));
 const typesTs = read(join(SRC, "types.ts"));
 check(
   "移动端与运行时",
@@ -85,6 +85,19 @@ check(
   "DEFAULT_SETTINGS",
 );
 check("移动端与运行时", "云端适配层存在且使用宿主 requestUrl", /requestUrl\s*\(/.test(read(cloudFile)), cloudFile);
+check(
+  "移动端与运行时",
+  "main.ts 未导入已搁置的云端适配层",
+  !/from\s+["'][^"']*speech\/cloud["']/.test(mainTs) && !/createCloudTtsEngine/.test(mainTs),
+  "运行时不接线（注释里提到路径不算导入）",
+);
+check("移动端与运行时", "main.js 严格零网络：不含 requestUrl", !/\brequestUrl\b/.test(mainJs));
+check(
+  "移动端与运行时",
+  "旧配置里的云端开启状态被强制归零",
+  /cloudTtsEnabled:\s*false/.test(read(join(SRC, "domain", "pluginData.ts"))),
+  "normalizeSettings",
+);
 
 // 全局 app：先剔除 this.app / xxx.app，再找裸 app.vault 等。
 const globalAppHits = [];
@@ -113,6 +126,41 @@ check(
 const headingNames = [...settings.matchAll(/setName\(["']([^"']+)["']\)\s*\.setHeading\(\)/g)].map((m) => m[1]);
 check("官方规范", "分组标题不含「设置」二字", headingNames.every((n) => !n.includes("设置")), headingNames.join(" / "));
 check("官方规范", "资源在 onunload 中统一清理", /onunload\s*\(/.test(mainTs) && /dispose\(\)/.test(mainTs));
+
+// ── 2b. v1.0.2 界面形态 ─────────────────────────────────────
+const workbenchView = read(join(SRC, "ui", "WorkbenchView.ts"));
+const historyView = read(join(SRC, "ui", "HistoryView.ts"));
+const chartTs = read(join(SRC, "ui", "Chart.ts"));
+const uiModelTs = read(join(SRC, "domain", "uiModel.ts"));
+check(
+  "界面形态",
+  "今日页签与卡片标题统一为「今日」",
+  /today:\s*"今日"/.test(uiModelTs) && /`今日 · \$\{day\}`/.test(uiModelTs),
+  "TAB_LABELS / todayCardTitle",
+);
+check(
+  "界面形态",
+  "今日 / 复习 / 浏览历史清单不再有「打开原文」按钮",
+  !workbenchView.includes('text: "打开原文"') && !historyView.includes('text: "打开原文"'),
+  "笔记名本身即入口",
+);
+check(
+  "界面形态",
+  "统计页只有列表内横向条形图，无上方纵向 SVG 柱状图",
+  workbenchView.includes("renderBarMeter(") &&
+    !workbenchView.includes("renderChart(") &&
+    !workbenchView.includes("kw-chart-scroll") &&
+    chartTs.includes("kw-count-bar-fill") &&
+    css.includes(".kw-count-bar-fill") &&
+    !css.includes(".kw-chart-bar"),
+  "两张已有卡片的下半部分",
+);
+check(
+  "界面形态",
+  "设置页不再暴露无法使用的云端地址 / 密钥输入",
+  !/启用云端神经语音|API 密钥/.test(settings) && /已搁置/.test(settings),
+  "朗读分组",
+);
 
 // ── 3. 构建产物纯净度 ─────────────────────────────────────────
 check("产物", "main.js 存在且非空", mainJs.length > 1000, `${mainJs.length} 字节`);
@@ -161,8 +209,8 @@ check("发布材料", "README 写明手机端朗读可能不可用", /手机|移
 check("发布材料", "README 声明默认零网络请求 / 隐私", /零网络|无网络|不联网/.test(readme));
 check(
   "发布材料",
-  "README 披露可选云端朗读与数据发送范围",
-  /云端/.test(readme) && /(仅发送|只发送|不发送)/.test(readme),
+  "README 说明云端朗读已搁置与严格零网络",
+  /云端/.test(readme) && /搁置/.test(readme) && /零网络/.test(readme),
 );
 
 // ── 6. 输出 ───────────────────────────────────────────────────

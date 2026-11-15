@@ -7,6 +7,7 @@ import {
   KIND_LABEL,
   TAB_LABELS,
   TAB_ORDER,
+  barRowsMax,
   decodeSelection,
   encodeSelection,
   groupToday,
@@ -30,7 +31,7 @@ import type {
   TodayItem,
   WorkbenchTab,
 } from "../types";
-import { enableDragScroll, renderChart } from "./Chart";
+import { enableDragScroll, renderBarMeter } from "./Chart";
 import { HistoryView } from "./HistoryView";
 import { NoteModal } from "./NoteModal";
 
@@ -43,8 +44,9 @@ const PHASE_TEXT: Record<string, string> = {
 
 /**
  * 正式视图：四个页签（今日 / 复习 / 统计 / 浏览历史）。
- * 统计页两个已有卡片内嵌全量柱状图，点柱子或分类名原地展开笔记清单，
- * 笔记名直达 vault 原文。渲染全程 try/catch，任何异常都不会留下空白页。
+ * 统计页两张已有卡片的下半部分列表每行带横向条形图，点条形或名称原地展开
+ * 笔记清单，笔记名直达 vault 原文；卡片上方不再有纵向柱状图。
+ * 渲染全程 try/catch，任何异常都不会留下空白页。
  */
 export class WorkbenchView extends ItemView {
   private readonly plugin: KnowledgeWorkbenchPlugin;
@@ -221,7 +223,7 @@ export class WorkbenchView extends ItemView {
     item.createDiv({ cls: "kw-stat-value", text: value });
   }
 
-  // ── 今日要处理 ────────────────────────────────────────────
+  // ── 今日 ──────────────────────────────────────────────────
   private renderToday(parent: HTMLElement, domain: DomainSnapshot): void {
     const folded = this.plugin.store.snapshot.todayFolded;
     const card = parent.createDiv({ cls: "kw-card kw-today-card" });
@@ -282,15 +284,11 @@ export class WorkbenchView extends ItemView {
     row.createSpan({ cls: "kw-kind", text: KIND_LABEL[item.kind] });
     const link = row.createEl("a", { cls: "kw-note-link", text: item.title });
     link.setAttr("href", "#");
+    link.setAttr("aria-label", `打开「${item.title}」的原文窗口`);
     link.addEventListener("click", (event: MouseEvent) => {
       event.preventDefault();
       this.openNote(item.path);
     });
-    const open = row.createEl("button", {
-      cls: "kw-open-btn",
-      text: "打开原文",
-    });
-    open.addEventListener("click", () => this.openOriginal(item.path));
     row.createDiv({
       cls: "kw-note-meta",
       text: `${item.detail} · ${item.path}`,
@@ -361,11 +359,9 @@ export class WorkbenchView extends ItemView {
   // ── 浏览历史（独立页签）────────────────────────────────────
   private renderHistory(parent: HTMLElement): void {
     const card = parent.createDiv({ cls: "kw-card" });
-    new HistoryView(
-      card,
-      (path) => this.openNote(path),
-      (path) => this.openOriginal(path),
-    ).render(this.plugin.store.history);
+    new HistoryView(card, (path) => this.openNote(path)).render(
+      this.plugin.store.history,
+    );
   }
 
   // ── 统计 ──────────────────────────────────────────────────
@@ -440,7 +436,7 @@ export class WorkbenchView extends ItemView {
     );
     icsCard.createDiv({ cls: "kw-hint", text: `路径：${domain.ics.path}` });
 
-    // 已有卡片：全量分类。只在卡片内部追加图表，不新增卡片、不改 layout。
+    // 已有卡片：全量分类。不新增卡片、不改 layout；仅在下半部分列表每行加横向条。
     const countsCard = parent.createDiv({ cls: "kw-card" });
     countsCard.createDiv({
       cls: "kw-card-title",
@@ -448,60 +444,50 @@ export class WorkbenchView extends ItemView {
     });
     const activeCategory =
       selection?.scope === "category" ? selection.key : null;
-    const catHost = countsCard.createDiv({ cls: "kw-chart-scroll" });
-    const catGeo = renderChart(
-      catHost,
-      domain.chart,
-      activeCategory,
-      (key) => this.selectSlice("category", key),
-    );
-    countsCard.createDiv({
-      cls: "kw-hint",
-      text: catGeo.truncated
-        ? `共 ${catGeo.totalSlices} 类，图表显示前 ${catGeo.bars.length} 类（列表仍为全量）；横向滚动查看，点柱子或分类名看笔记清单。`
-        : `共 ${catGeo.totalSlices} 类全部出柱；横向滚动查看，点柱子或分类名看笔记清单。`,
-    });
+    const catMax = barRowsMax(domain.categories);
     const pickedCategory = activeCategory
       ? domain.chart.find((slice) => slice.key === activeCategory)
       : undefined;
     if (pickedCategory) {
       this.renderCategoryNotes(countsCard, pickedCategory, domain, "category");
     } else {
+      countsCard.createDiv({
+        cls: "kw-hint",
+        text: `共 ${domain.categories.length} 类，条形按篇数比例绘制；点名称或条形查看该类笔记清单。`,
+      });
       const detail = countsCard.createDiv({
         cls: "kw-detail kw-detail-short",
       });
-      this.renderCountRows(detail, domain.categories, (key) => key, "category");
+      this.renderCountRows(
+        detail,
+        domain.categories,
+        (key) => key,
+        "category",
+        catMax,
+      );
       if (!domain.categories.length) {
         detail.createDiv({ cls: "kw-empty", text: "尚无索引结果。" });
       }
     }
 
-    // 已有卡片：标签 / 文件夹。图表 key 与列表行显示名完全一致。
+    // 已有卡片：标签 / 文件夹。条形 key 与列表行显示名完全一致。
     const tagCard = parent.createDiv({ cls: "kw-card" });
     tagCard.createDiv({
       cls: "kw-card-title",
       text: `标签 / 文件夹（标签 ${domain.tagCounts.length} 个，文件夹 ${domain.folderCounts.length} 个）`,
     });
     const activeDetail = selection?.scope === "detail" ? selection.key : null;
-    const tagHost = tagCard.createDiv({ cls: "kw-chart-scroll" });
-    const tagGeo = renderChart(
-      tagHost,
-      domain.detailChart,
-      activeDetail,
-      (key) => this.selectSlice("detail", key),
-    );
-    tagCard.createDiv({
-      cls: "kw-hint",
-      text: tagGeo.truncated
-        ? `共 ${tagGeo.totalSlices} 项，图表显示前 ${tagGeo.bars.length} 项；横向滚动查看，点柱子或名称看笔记清单。`
-        : `标签与目录共 ${tagGeo.totalSlices} 项全部出柱；横向滚动查看，点柱子或名称看笔记清单。`,
-    });
+    const tagMax = barRowsMax([...domain.tagCounts, ...domain.folderCounts]);
     const pickedDetail = activeDetail
       ? domain.detailChart.find((slice) => slice.key === activeDetail)
       : undefined;
     if (pickedDetail) {
       this.renderCategoryNotes(tagCard, pickedDetail, domain, "detail");
     } else {
+      tagCard.createDiv({
+        cls: "kw-hint",
+        text: `标签 ${domain.tagCounts.length} 个、文件夹 ${domain.folderCounts.length} 个，条形按篇数比例绘制；点名称或条形查看笔记清单。`,
+      });
       const tagDetail = tagCard.createDiv({
         cls: "kw-detail kw-detail-short",
       });
@@ -510,12 +496,14 @@ export class WorkbenchView extends ItemView {
         domain.tagCounts.slice(0, 30),
         (key) => `#${key}`,
         "detail",
+        tagMax,
       );
       this.renderCountRows(
         tagDetail,
         domain.folderCounts.slice(0, 30),
         (key) => `目录 · ${key}`,
         "detail",
+        tagMax,
       );
       if (!domain.tagCounts.length && !domain.folderCounts.length) {
         tagDetail.createDiv({
@@ -541,18 +529,26 @@ export class WorkbenchView extends ItemView {
     counts: CategoryCount[],
     label: (key: string) => string,
     scope: ChartScope,
+    max: number,
   ): void {
     for (const item of counts) {
+      const name = label(item.key);
       const row = parent.createDiv({ cls: "kw-count-row" });
       const link = row.createEl("a", {
         cls: "kw-count-key kw-count-link",
-        text: label(item.key),
+        text: name,
       });
       link.setAttr("href", "#");
-      link.setAttr("aria-label", `查看${label(item.key)}的笔记清单`);
+      link.setAttr("aria-label", `查看${name}的笔记清单`);
       link.addEventListener("click", (event: MouseEvent) => {
         event.preventDefault();
-        this.selectSlice(scope, label(item.key));
+        this.selectSlice(scope, name);
+      });
+      renderBarMeter(row, {
+        count: item.count,
+        max,
+        label: name,
+        onSelect: () => this.selectSlice(scope, name),
       });
       row.createSpan({ cls: "kw-count-value", text: `${item.count} 篇` });
     }
@@ -671,7 +667,7 @@ export class WorkbenchView extends ItemView {
   private renderFooter(parent: HTMLElement): void {
     parent.createDiv({
       cls: "kw-hint kw-footer",
-      text: `知识管理工作台 v${this.plugin.manifest.version} · 业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责。默认零网络请求，仅在你显式开启云端朗读时才会向自填服务地址发送待朗读文本。`,
+      text: `知识管理工作台 v${this.plugin.manifest.version} · 业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责。插件不发起任何网络请求，云端神经朗读已搁置。`,
     });
   }
 
@@ -691,7 +687,7 @@ export class WorkbenchView extends ItemView {
     }
   }
 
-  /** 笔记名对应的「打开原文」入口，重命名后由 vault 路径自动跟随。 */
+  /** 统计清单笔记名的直达原文入口，重命名后由 vault 路径自动跟随。 */
   private openOriginal(path: string): void {
     void this.app.workspace.openLinkText(
       path.replace(/\.md$/i, ""),

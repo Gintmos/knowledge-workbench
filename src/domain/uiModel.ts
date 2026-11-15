@@ -1,6 +1,4 @@
 import {
-  CHART_MAX_BARS,
-  CHART_MIN_SLOT,
   HISTORY_LIMIT,
   type ChartSlice,
   type HistoryEntry,
@@ -14,7 +12,7 @@ import {
 export const TAB_ORDER: WorkbenchTab[] = ["today", "review", "stats", "history"];
 
 export const TAB_LABELS: Record<WorkbenchTab, string> = {
-  today: "今日要处理",
+  today: "今日",
   review: "复习",
   stats: "统计",
   history: "浏览历史",
@@ -36,7 +34,7 @@ export function isTab(value: unknown): value is WorkbenchTab {
  * 计数只在展开后的分组里显示。
  */
 export function todayCardTitle(day: string): string {
-  return `今日要处理 · ${day}`;
+  return `今日 · ${day}`;
 }
 
 /** 按类型分组，用于展开后的分组清单；items 已由 TaskService 排好序。 */
@@ -150,114 +148,27 @@ export function filterPaths(
   return new Set(slice?.paths ?? []);
 }
 
-export interface ChartOptions {
-  width?: number;
-  height?: number;
-  /** 全量模式下每根柱子的最小槽宽；总宽超过容器时由 CSS 横向滚动。 */
-  minSlot?: number;
-  /** 防御上限，避免极端库生成超大 SVG。 */
-  maxBars?: number;
-  padX?: number;
-  padTop?: number;
-  padBottom?: number;
-  gap?: number;
-  /** 单个中文字符的估算宽度，用于保证相邻标签不重叠。 */
-  charWidth?: number;
-}
-
-export interface BarGeometry {
-  key: string;
-  count: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  centerX: number;
-  label: string;
-  labelY: number;
-  valueY: number;
-}
-
-export interface ChartGeometry {
-  width: number;
-  height: number;
-  plotBottom: number;
-  max: number;
-  slot: number;
-  bars: BarGeometry[];
-  totalSlices: number;
-  truncated: boolean;
-}
-
-/** 标签按可用槽宽截断，末尾用省略号，绝不与相邻柱子标签重叠。 */
-export function truncateLabel(key: string, maxChars: number): string {
-  const chars = [...key];
-  if (chars.length <= maxChars) return key;
-  if (maxChars <= 1) return chars[0] ?? "";
-  return `${chars.slice(0, maxChars - 1).join("")}…`;
-}
-
 /**
- * 全量柱状图的几何计算（纯函数，不接触 DOM）。
- * 所有分类都出柱；宽度按 minSlot × 类别数扩展，由外层容器横向滚动查看。
- * 文字不重叠的保证：每个标签的估算宽度 ≤ slot - gap，且标签中心间距 = slot。
+ * 列表内横向条形图：宽度与该卡片内最大值成比例（纯函数，便于单测）。
+ * v1.0.2 起统计卡片不再绘制上方纵向 SVG 柱状图，全部分类都在下半部分列表出条。
+ * 非零计数至少给 3% 的可见宽度；非法值返回 0，不产生 NaN 样式。
  */
-export function chartGeometry(
-  slices: ChartSlice[],
-  options: ChartOptions = {},
-): ChartGeometry {
-  const height = Math.max(100, options.height ?? 190);
-  const padX = options.padX ?? 12;
-  const padTop = options.padTop ?? 26;
-  const padBottom = options.padBottom ?? 42;
-  const gap = options.gap ?? 8;
-  const charWidth = options.charWidth ?? 9;
-  const minSlot = Math.max(24, options.minSlot ?? CHART_MIN_SLOT);
-  const maxBars = Math.max(1, options.maxBars ?? CHART_MAX_BARS);
+export function barWidthPercent(count: number, max: number): number {
+  if (
+    !Number.isFinite(count) ||
+    count <= 0 ||
+    !Number.isFinite(max) ||
+    max <= 0
+  ) {
+    return 0;
+  }
+  const ratio = Math.min(1, count / max);
+  return Math.max(3, Math.round(ratio * 1000) / 10);
+}
 
-  const limited = slices.slice(0, maxBars);
-  const count = Math.max(1, limited.length);
-  const width = Math.max(
-    120,
-    options.width ?? 320,
-    limited.length * minSlot + padX * 2,
-  );
-  const plotBottom = height - padBottom;
-  const plotHeight = Math.max(1, plotBottom - padTop);
-  const plotWidth = Math.max(1, width - padX * 2);
-  const slot = plotWidth / count;
-  const max = Math.max(1, ...limited.map((slice) => slice.count));
-  const barWidth = Math.max(4, Math.min(28, slot - gap));
-  const maxChars = Math.max(2, Math.floor((slot - gap) / charWidth));
-
-  const bars = limited.map((slice, index) => {
-    const barHeight = Math.max(2, (slice.count / max) * plotHeight);
-    const x = padX + index * slot + (slot - barWidth) / 2;
-    const y = plotBottom - barHeight;
-    return {
-      key: slice.key,
-      count: slice.count,
-      x,
-      y,
-      width: barWidth,
-      height: barHeight,
-      centerX: x + barWidth / 2,
-      label: truncateLabel(slice.key, maxChars),
-      labelY: Math.min(height - 4, plotBottom + 15),
-      valueY: Math.max(padTop - 6, y - 5),
-    };
-  });
-
-  return {
-    width,
-    height,
-    plotBottom,
-    max,
-    slot,
-    bars,
-    totalSlices: slices.length,
-    truncated: slices.length > limited.length,
-  };
+/** 一组计数的基准最大值；空组返回 1，避免除零。 */
+export function barRowsMax(counts: Array<{ count: number }>): number {
+  return Math.max(1, ...counts.map((item) => item.count));
 }
 
 // ── P6：明细列表懒渲染 ────────────────────────────────────────

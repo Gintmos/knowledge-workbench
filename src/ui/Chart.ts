@@ -1,82 +1,39 @@
-import {
-  chartGeometry,
-  type ChartGeometry,
-  type ChartOptions,
-} from "../domain/uiModel";
-import type { ChartSlice } from "../types";
+import { barWidthPercent } from "../domain/uiModel";
 
 /**
- * 内联 SVG 全量柱状图：零外部依赖，颜色全部由 styles.css 的主题变量提供。
- * 几何计算来自纯函数 chartGeometry；所有分类都出柱，总宽超过容器时横向滚动。
- *
- * 关键规范：createSvg 的 cls 只能是单个类名（宿主内部用 classList.add，
- * 含空格会抛 InvalidCharacterError 并中断整页渲染），多类名必须事后 add。
+ * 统计卡片下半部分的列表内横向条形图（v1.0.2）。
+ * 不再绘制上方纵向 SVG 柱状图：每一行一条，宽度与该卡片最大值成比例。
+ * 颜色全部来自 styles.css 的主题变量，不拼接 HTML、不引入外部依赖。
+ * 条形与名称链接等价：可点击、可键盘操作，展开该分类的笔记清单。
  */
-export function renderChart(
+export function renderBarMeter(
   parent: HTMLElement,
-  slices: ChartSlice[],
-  activeKey: string | null,
-  onSelect: (key: string | null) => void,
-  options: ChartOptions = {},
-): ChartGeometry {
-  const geo = chartGeometry(slices, options);
-  const svg = parent.createSvg("svg", { cls: "kw-chart" });
-  svg.setAttribute("viewBox", `0 0 ${geo.width} ${geo.height}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  svg.setAttribute("role", "img");
-  svg.setAttribute(
+  options: {
+    count: number;
+    max: number;
+    label: string;
+    onSelect: () => void;
+  },
+): HTMLElement {
+  const meter = parent.createDiv({ cls: "kw-count-bar" });
+  meter.setAttr("role", "button");
+  meter.setAttr("tabindex", "0");
+  meter.setAttr(
     "aria-label",
-    `全量分类柱状图，共 ${geo.bars.length} 根柱子，可横向滚动；点击柱子查看该分类笔记`,
+    `${options.label}，${options.count} 篇，点击查看笔记清单`,
   );
-  // 明确像素宽度，避免 SVG 被容器压扁导致所有柱子挤在一起。
-  svg.style.width = `${geo.width}px`;
-  svg.style.height = `${geo.height}px`;
+  const fill = meter.createDiv({ cls: "kw-count-bar-fill" });
+  fill.style.width = `${barWidthPercent(options.count, options.max)}%`;
 
-  const axis = svg.createSvg("line", { cls: "kw-chart-axis" });
-  axis.setAttribute("x1", "0");
-  axis.setAttribute("y1", String(geo.plotBottom));
-  axis.setAttribute("x2", String(geo.width));
-  axis.setAttribute("y2", String(geo.plotBottom));
-
-  for (const bar of geo.bars) {
-    const group = svg.createSvg("g", { cls: "kw-chart-col" });
-    if (activeKey === bar.key) group.classList.add("is-active");
-    group.setAttribute("role", "button");
-    group.setAttribute("tabindex", "0");
-    group.setAttribute("aria-label", `${bar.key}，${bar.count} 篇，点击查看笔记清单`);
-
-    const rect = group.createSvg("rect", { cls: "kw-chart-bar" });
-    rect.setAttribute("x", String(bar.x));
-    rect.setAttribute("y", String(bar.y));
-    rect.setAttribute("width", String(bar.width));
-    rect.setAttribute("height", String(bar.height));
-    rect.setAttribute("rx", "2");
-
-    const tip = group.createSvg("title");
-    tip.textContent = `${bar.key} · ${bar.count} 篇（点击查看笔记清单）`;
-
-    const value = group.createSvg("text", { cls: "kw-chart-value" });
-    value.setAttribute("x", String(bar.centerX));
-    value.setAttribute("y", String(bar.valueY));
-    value.setAttribute("text-anchor", "middle");
-    value.textContent = String(bar.count);
-
-    const label = group.createSvg("text", { cls: "kw-chart-label" });
-    label.setAttribute("x", String(bar.centerX));
-    label.setAttribute("y", String(bar.labelY));
-    label.setAttribute("text-anchor", "middle");
-    label.textContent = bar.label;
-
-    const select = (): void => onSelect(activeKey === bar.key ? null : bar.key);
-    group.addEventListener("click", select);
-    group.addEventListener("keydown", (event: KeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        select();
-      }
-    });
-  }
-  return geo;
+  const select = (): void => options.onSelect();
+  meter.addEventListener("click", select);
+  meter.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      select();
+    }
+  });
+  return meter;
 }
 
 /**

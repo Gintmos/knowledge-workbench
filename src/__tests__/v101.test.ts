@@ -1,4 +1,4 @@
-/** v1.0.1 专项回归：Outlook .ics 兼容、页签迁移、全量图表、韵律与云端回退。 */
+/** v1.0.1 / v1.0.2 专项回归：Outlook .ics、页签迁移、横向条形图、韵律与云端搁置。 */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SpeechService } from "../data/SpeechService";
@@ -6,7 +6,8 @@ import { allCategorySlices, detailSlices } from "../domain/ClassifierService";
 import { buildIcsEvents, nextIcsDate, renderIcs } from "../domain/ics";
 import { normalizeData, normalizeSettings } from "../domain/pluginData";
 import {
-  chartGeometry,
+  barRowsMax,
+  barWidthPercent,
   decodeSelection,
   encodeSelection,
   normalizeTabDetail,
@@ -110,7 +111,7 @@ test("旧「知识库」页签映射到统计，坏死筛选值被清理", () =>
   );
 });
 
-test("云端朗读默认关闭，地址与密钥留空；旧配置自动补默认值", () => {
+test("v1.0.2 云端朗读搁置：默认关闭，旧 data.json 的开启状态强制归零", () => {
   assert.equal(DEFAULT_SETTINGS.cloudTtsEnabled, false);
   assert.equal(DEFAULT_SETTINGS.cloudTtsUrl, "");
   assert.equal(DEFAULT_SETTINGS.cloudTtsKey, "");
@@ -119,7 +120,11 @@ test("云端朗读默认关闭，地址与密钥留空；旧配置自动补默�
   assert.equal(settings.speechProsody, true);
   assert.equal(settings.speechPauseMs, 420);
   assert.ok(settings.cloudTtsModel.length > 0);
-  assert.equal(normalizeSettings({ cloudTtsEnabled: true }).cloudTtsEnabled, true);
+  assert.equal(
+    normalizeSettings({ cloudTtsEnabled: true, cloudTtsUrl: "x.invalid" }).cloudTtsEnabled,
+    false,
+    "旧配置里残留的开启状态不得恢复云端入口",
+  );
 });
 
 // ── 全量图表与下钻数据 ───────────────────────────────────────
@@ -142,25 +147,17 @@ test("全量分类与标签/目录切片都带完整路径，显示名与列表�
   assert.deepEqual(tagSlice.paths.sort(), ["顶层.md", "项目/a.md"]);
 });
 
-test("全量柱状图不截断常见库，极端库触发防御上限", () => {
-  const many = Array.from({ length: 12 }, (_, i) => ({
+test("v1.0.2 全量分类都用横向条形，不再截断为前 200 根柱子", () => {
+  const many = Array.from({ length: 260 }, (_, i) => ({
     key: `分类${i}`,
     count: i + 1,
     paths: [`p${i}.md`],
   }));
-  const geo = chartGeometry(many);
-  assert.equal(geo.bars.length, 12);
-  assert.equal(geo.truncated, false);
-  assert.ok(geo.width >= 12 * 62);
-  const huge = Array.from({ length: 260 }, (_, i) => ({
-    key: `类${i}`,
-    count: 1,
-    paths: [`p${i}.md`],
-  }));
-  const capped = chartGeometry(huge);
-  assert.equal(capped.bars.length, 200);
-  assert.equal(capped.totalSlices, 260);
-  assert.equal(capped.truncated, true);
+  const max = barRowsMax(many);
+  assert.equal(max, 260);
+  assert.equal(many.length, 260, "全部分类都能出条，不再有 SVG 柱子防御上限");
+  assert.equal(barWidthPercent(many[0].count, max), 3, "最少的一类仍有可见条");
+  assert.equal(barWidthPercent(many[259].count, max), 100, "最多的一类占满");
 });
 
 // ── 朗读韵律 ────────────────────────────────────────────────

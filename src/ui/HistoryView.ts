@@ -3,13 +3,13 @@ import type { HistoryEntry } from "../types";
 
 /**
  * 浏览历史：由宿主的 file-open 自动采集，最新在前、同一路径去重、最多 20 篇。
- * 独立页签；标题打开带朗读的 Markdown 弹窗，同行按钮直达 vault 原文。
+ * 独立页签；标题即入口，打开带朗读的原文窗口（窗口内有「在 Obsidian 中打开」）。
+ * v1.0.2 起不再重复提供「打开原文」按钮。
  */
 export class HistoryView {
   constructor(
     private readonly parent: HTMLElement,
     private readonly onOpen: (path: string) => void,
-    private readonly onOpenOriginal: (path: string) => void,
   ) {}
 
   render(entries: HistoryEntry[]): void {
@@ -34,15 +34,11 @@ export class HistoryView {
         text: entry.title || entry.path,
       });
       link.setAttr("href", "#");
+      link.setAttr("aria-label", `打开「${entry.title || entry.path}」的原文窗口`);
       link.addEventListener("click", (event: MouseEvent) => {
         event.preventDefault();
         this.onOpen(entry.path);
       });
-      const open = row.createEl("button", {
-        cls: "kw-open-btn",
-        text: "打开原文",
-      });
-      open.addEventListener("click", () => this.onOpenOriginal(entry.path));
       row.createDiv({
         cls: "kw-note-meta",
         text: `${new Date(entry.at).toLocaleString("zh-CN")} · ${entry.path}`,

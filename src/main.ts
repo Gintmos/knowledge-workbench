@@ -7,7 +7,6 @@ import { WorkbenchService } from "./data/WorkbenchService";
 import { planReview } from "./domain/ReviewService";
 import { todayString } from "./domain/TaskService";
 import { TAB_LABELS, TAB_ORDER } from "./domain/uiModel";
-import { createCloudTtsEngine } from "./speech/cloud";
 import { createDomSpeechEngine } from "./speech/engine";
 import { NoteModal } from "./ui/NoteModal";
 import { WorkbenchView } from "./ui/WorkbenchView";
@@ -46,21 +45,12 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     this.workbench = new WorkbenchService(this.app, this.store, this.index, {
       mobile: Platform.isMobile,
     });
-    // 双引擎：云端神经语音（默认关闭）优先，不可用时回退系统语音 + 规则式韵律。
+    // v1.0.2：云端神经 TTS 暂时搁置（没有可用的自有服务地址），运行时不接线。
+    // 朗读只走系统语音 + 规则式韵律（方案 A），Android 无语音时用朗读稿替代路径。
+    // 适配层 src/speech/cloud.ts 保留在源码中但未导入，产物 main.js 不含任何联网入口。
     const domEngine = createDomSpeechEngine(() => this.speech?.onVoicesChanged());
     this.speech = new SpeechService({
       engine: domEngine,
-      cloudEngine: createCloudTtsEngine(() => {
-        const settings = this.store.settings;
-        return {
-          enabled: settings.cloudTtsEnabled,
-          url: settings.cloudTtsUrl,
-          key: settings.cloudTtsKey,
-          model: settings.cloudTtsModel,
-          voice: settings.cloudTtsVoice,
-          style: settings.cloudTtsStyle,
-        };
-      }),
       mobile: Platform.isMobile,
       rate: this.store.settings.speechRate,
       preferChineseVoice: this.store.settings.speechPreferChineseVoice,
@@ -228,7 +218,7 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
       }
       new Notice(
         parts.length
-          ? `知识管理工作台：${parts.join("、")}。详情见工作台「今日要处理」。`
+          ? `知识管理工作台：${parts.join("、")}。详情见工作台「今日」。`
           : "知识管理工作台：今日没有待处理事项。",
         6000,
       );
@@ -264,11 +254,6 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     } catch {
       new Notice("当前设备不支持剪贴板，请直接在 vault 中打开 .ics 文件");
     }
-  }
-
-  /** 云端朗读配置变化后允许重新尝试云端引擎。 */
-  refreshSpeechCloud(): void {
-    this.speech.refreshCloud();
   }
 
   /**

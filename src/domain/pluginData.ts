@@ -60,10 +60,8 @@ export function normalizeSettings(raw: unknown): WorkbenchSettings {
       1200,
       Math.max(0, Math.floor(finiteNumber(source["speechPauseMs"], DEFAULT_SETTINGS.speechPauseMs))),
     ),
-    cloudTtsEnabled:
-      typeof source["cloudTtsEnabled"] === "boolean"
-        ? source["cloudTtsEnabled"]
-        : DEFAULT_SETTINGS.cloudTtsEnabled,
+    // v1.0.2：云端神经朗读已搁置，旧 data.json 里残留的开启状态一律强制关闭。
+    cloudTtsEnabled: false,
     cloudTtsUrl:
       typeof source["cloudTtsUrl"] === "string" ? source["cloudTtsUrl"] : DEFAULT_SETTINGS.cloudTtsUrl,
     cloudTtsKey:

@@ -73,7 +73,7 @@ export class SpeechBar {
     this.fallbackEl = this.root.createDiv({ cls: "kw-speech-fallback" });
     this.fallbackEl.createDiv({
       cls: "kw-hint",
-      text: "Android 的 WebView 通常不提供 Web Speech。要真人级语气，请在「设置 → 朗读」开启云端神经语音并填写服务地址与密钥；离线时可把朗读稿复制到剪贴板或保存到库内，再用系统「随选朗读 / 选择即朗读」发声。",
+      text: "Android 的 WebView 通常不提供 Web Speech；插件内的真人级云端语音已搁置。可把朗读稿复制到剪贴板或保存到库内，再用系统「随选朗读 / 选择即朗读」发声（系统神经音色通常比插件内系统语音更自然）。",
     });
     const fallbackRow = this.fallbackEl.createDiv({ cls: "kw-speech-row" });
     const copy = fallbackRow.createEl("button", {

@@ -147,7 +147,7 @@ await step("打开工作台视图与四个页签", async () => {
 });
 
 const TABS = [
-  ["today", "今日要处理"],
+  ["today", "今日"],
   ["review", "复习"],
   ["stats", "统计"],
   ["history", "浏览历史"],
@@ -156,38 +156,40 @@ for (const [tab, label] of TABS) {
   await step(`页签切换 · ${label}`, async () => {
     await evalJS(`(() => { const a = ${APP}; a.commands.executeCommandById('knowledge-workbench:open-workbench-${tab}'); return true; })()`, true);
     await sleep(340);
-    const state = await evalJS(`(() => { const act = document.querySelector('.kw-tab.is-active'); const pane = document.querySelector('.kw-pane'); return { active: act ? act.textContent.trim() : '', len: pane ? pane.textContent.length : 0, text: pane ? pane.textContent.slice(0, 400) : '', svg: document.querySelectorAll('.kw-view svg.kw-chart').length, bars: document.querySelectorAll('.kw-chart-bar').length, scrolls: document.querySelectorAll('.kw-view .kw-chart-scroll').length, errorCard: document.querySelectorAll('.kw-error-card').length }; })()`);
-    // 统计页两个已有卡片内嵌全量柱状图（横向滚动），知识库页签已取消。
+    const state = await evalJS(`(() => { const act = document.querySelector('.kw-tab.is-active'); const pane = document.querySelector('.kw-pane'); return { active: act ? act.textContent.trim() : '', len: pane ? pane.textContent.length : 0, text: pane ? pane.textContent.slice(0, 400) : '', svg: document.querySelectorAll('.kw-view svg.kw-chart').length, bars: document.querySelectorAll('.kw-view .kw-count-bar').length, openBtns: [...document.querySelectorAll('.kw-open-btn')].filter(b => b.textContent.includes('打开原文')).length, errorCard: document.querySelectorAll('.kw-error-card').length }; })()`);
+    // v1.0.2：统计页只在下半部分列表出横向条；所有清单不再有重复的「打开原文」按钮。
     const ok = state?.active === label && state?.len > 0 && state?.errorCard === 0
-      && (tab !== "stats" || (state?.svg === 2 && state?.bars > 0 && state?.scrolls === 2 && /标签|文件夹|索引/.test(state?.text ?? "")))
+      && state?.openBtns === 0
+      && (tab !== "stats" || (state?.svg === 0 && state?.bars > 0 && /标签|文件夹|索引/.test(state?.text ?? "")))
       && (tab !== "history" || /最近浏览/.test(state?.text ?? ""));
-    return { ok, detail: `高亮=${state?.active} 内容 ${state?.len} 字${tab === "stats" ? ` · SVG ${state?.svg} · 柱 ${state?.bars} · 滚动容器 ${state?.scrolls}` : ""} · 错误卡片 ${state?.errorCard}` };
+    return { ok, detail: `高亮=${state?.active} 内容 ${state?.len} 字${tab === "stats" ? ` · SVG ${state?.svg} · 横向条 ${state?.bars}` : ""} · 打开原文按钮 ${state?.openBtns} · 错误卡片 ${state?.errorCard}` };
   });
 }
 
-await step("统计页：两张已有卡片都嵌了全量柱状图且可横向滚动", async () => {
+await step("统计页：两张已有卡片下半部分为横向条形图、上方无 SVG 柱状图", async () => {
   await evalJS(`(() => { const a = ${APP}; a.commands.executeCommandById('knowledge-workbench:open-workbench-stats'); return true; })()`, true);
   await sleep(400);
-  const info = await evalJS(`(() => { const hosts = [...document.querySelectorAll('.kw-view .kw-chart-scroll')]; return hosts.map(h => ({ scrollWidth: h.scrollWidth, clientWidth: h.clientWidth, overflowX: getComputedStyle(h).overflowX, bars: h.querySelectorAll('.kw-chart-bar').length, svgWidth: h.querySelector('svg.kw-chart')?.style.width || '' })); })()`);
+  const info = await evalJS(`(() => { const cards = [...document.querySelectorAll('.kw-view .kw-card')].filter(c => { const t = c.querySelector('.kw-card-title')?.textContent || ''; return t.includes('全量分类') || t.includes('标签'); }); return cards.map(c => ({ bars: c.querySelectorAll('.kw-count-bar').length, fills: [...c.querySelectorAll('.kw-count-bar-fill')].map(f => f.style.width), svg: c.querySelectorAll('svg.kw-chart').length, scroll: c.querySelectorAll('.kw-chart-scroll').length, names: c.querySelectorAll('.kw-count-link').length })); })()`);
   const ok = Array.isArray(info) && info.length === 2
-    && info.every(h => h.bars > 0 && h.overflowX === 'auto' && /^\d+px$/.test(h.svgWidth));
-  return { ok, detail: info ? info.map((h, i) => `卡片${i + 1}: ${h.bars} 柱 / SVG ${h.svgWidth} / 容器 ${h.clientWidth}px / overflow-x=${h.overflowX}`).join(' · ') : "未找到图表容器" };
+    && info.every(c => c.bars > 0 && c.names === c.bars && c.svg === 0 && c.scroll === 0
+      && c.fills.length === c.bars && c.fills.every(w => /^\d+(\.\d+)?%$/.test(w)));
+  return { ok, detail: info ? info.map((c, i) => `卡片${i + 1}: ${c.bars} 条 / 名称 ${c.names} / SVG ${c.svg} / 宽度 ${c.fills.slice(0, 3).join(',')}`).join(' · ') : "未找到统计卡片" };
 });
 
-await step("关键回归：点击 SVG 柱不再空白，并显示该分类笔记清单", async () => {
+await step("关键回归：点击横向条形不空白，并显示该分类笔记清单", async () => {
   await evalJS(`(() => { const a = ${APP}; a.commands.executeCommandById('knowledge-workbench:open-workbench-stats'); return true; })()`, true);
   await sleep(400);
-  // 确保从未选中状态开始，避免点同一根柱子被当作「取消筛选」。
+  // 确保从未选中状态开始，避免点同一条被当作「取消筛选」。
   await evalJS(`(() => { const b = [...document.querySelectorAll('.kw-open-btn')].find(x => x.textContent.includes('返回分类列表')); if (b) b.click(); return true; })()`, true);
   await sleep(320);
-  const before = await evalJS(`(() => { const pane = document.querySelector('.kw-pane'); return { len: pane ? pane.textContent.length : 0, bars: document.querySelectorAll('.kw-chart-bar').length }; })()`);
-  await evalJS(`(() => { const col = document.querySelector('.kw-chart-col'); if (!col) return false; col.dispatchEvent(new MouseEvent('click', { bubbles: true })); return true; })()`, true);
+  const before = await evalJS(`(() => { const pane = document.querySelector('.kw-pane'); return { len: pane ? pane.textContent.length : 0, bars: document.querySelectorAll('.kw-view .kw-count-bar').length }; })()`);
+  await evalJS(`(() => { const bar = document.querySelector('.kw-view .kw-count-bar'); if (!bar) return false; bar.dispatchEvent(new MouseEvent('click', { bubbles: true })); return true; })()`, true);
   await sleep(450);
-  const after = await evalJS(`(() => { const pane = document.querySelector('.kw-pane'); return { len: pane ? pane.textContent.length : 0, bars: document.querySelectorAll('.kw-chart-bar').length, rows: document.querySelectorAll('.kw-detail .kw-note-row').length, links: document.querySelectorAll('.kw-detail .kw-note-link').length, preview: [...document.querySelectorAll('.kw-detail .kw-open-btn')].some(b => b.textContent.includes('预览')), errorCard: document.querySelectorAll('.kw-error-card').length, active: document.querySelectorAll('.kw-chart-col.is-active').length }; })()`);
+  const after = await evalJS(`(() => { const pane = document.querySelector('.kw-pane'); return { len: pane ? pane.textContent.length : 0, rows: document.querySelectorAll('.kw-detail .kw-note-row').length, links: document.querySelectorAll('.kw-detail .kw-note-link').length, preview: [...document.querySelectorAll('.kw-detail .kw-open-btn')].some(b => b.textContent.includes('预览')), back: [...document.querySelectorAll('.kw-open-btn')].some(b => b.textContent.includes('返回分类列表')), errorCard: document.querySelectorAll('.kw-error-card').length, svg: document.querySelectorAll('svg.kw-chart').length }; })()`);
   const ok = Boolean(before?.bars) && Boolean(after?.len) && after?.len > 200
-    && after?.bars > 0 && after?.rows > 0 && after?.links > 0 && after?.preview
-    && after?.errorCard === 0 && after?.active === 1;
-  return { ok, detail: `点击前 ${before?.len} 字/${before?.bars} 柱 → 点击后 ${after?.len} 字/${after?.bars} 柱 · 清单 ${after?.rows} 行/${after?.links} 链接 · 高亮 ${after?.active} · 错误卡片 ${after?.errorCard}` };
+    && after?.rows > 0 && after?.links > 0 && after?.preview && after?.back
+    && after?.errorCard === 0 && after?.svg === 0;
+  return { ok, detail: `点击前 ${before?.len} 字/${before?.bars} 条 → 点击后 ${after?.len} 字 · 清单 ${after?.rows} 行/${after?.links} 链接 · 返回按钮=${after?.back} · SVG ${after?.svg} · 错误卡片 ${after?.errorCard}` };
 });
 
 await step("清单里的笔记名直达原文（不弹预览窗）", async () => {
@@ -240,12 +242,12 @@ await step("今日卡片折叠标题一致", async () => {
   const ok = fold && fold.before.title === fold.middle.title && fold.before.title === fold.after.title
     && fold.middle.folded !== fold.before.folded && fold.after.folded === fold.before.folded
     && (fold.middle.rows === 0 || fold.before.rows === 0 || fold.middle.rows !== fold.before.rows)
-    && !/\d+ 项待处理/.test(fold.before.title);
+    && /^今日 · /.test(fold.before.title) && !/\d+ 项待处理/.test(fold.before.title);
   return { ok, detail: fold ? `「${fold.before.title}」标题一致 · 折叠 ${fold.before.folded}→${fold.middle.folded}→${fold.after.folded} · 行数 ${fold.before.rows}→${fold.middle.rows}→${fold.after.rows}` : "未找到折叠按钮" };
 });
 
 await step("笔记弹窗 Markdown 渲染与关闭", async () => {
-  // 回到「今日要处理」并确保清单展开，从今日清单点笔记名打开统一弹窗。
+  // 回到「今日」并确保清单展开，从今日清单点笔记名打开统一弹窗。
   await evalJS(`(() => { const a = ${APP}; a.commands.executeCommandById('knowledge-workbench:open-workbench-today'); return true; })()`, true);
   await sleep(380);
   await evalJS(`(() => { const btn = document.querySelector('.kw-fold-btn'); if (btn && btn.classList.contains('is-folded')) btn.click(); return true; })()`, true);
@@ -293,9 +295,11 @@ await step("朗读能力与中文音色", async () => {
   return { ok: Boolean(speech?.ok), detail: speech ? `Web Speech 可用 · 音色 ${speech.total} 个（中文 ${speech.zh} 个）` : "无法检测" };
 });
 
-await step("云端朗读默认关闭、引擎标签可见", async () => {
-  const state = await evalJS(`(() => { const a = ${APP}; const p = a?.plugins?.plugins?.['knowledge-workbench']; if (!p) return null; const snap = p.speech.getSnapshot(); return { enabled: p.store.settings.cloudTtsEnabled, url: p.store.settings.cloudTtsUrl, key: p.store.settings.cloudTtsKey, label: snap.engineLabel, prosody: p.store.settings.speechProsody }; })()`);
-  return { ok: state?.enabled === false && state?.url === '' && state?.key === '' && Boolean(state?.label) && state?.prosody === true, detail: state ? `云端默认关闭=${!state.enabled} · 地址/密钥留空=${!state.url && !state.key} · 引擎=${state.label} · 韵律=${state.prosody}` : "插件实例未加载" };
+await step("云端朗读已搁置：运行时未接线、引擎为系统语音", async () => {
+  const state = await evalJS(`(() => { const a = ${APP}; const p = a?.plugins?.plugins?.['knowledge-workbench']; if (!p) return null; const snap = p.speech.getSnapshot(); return { enabled: p.store.settings.cloudTtsEnabled, url: p.store.settings.cloudTtsUrl, key: p.store.settings.cloudTtsKey, label: snap.engineLabel, prosody: p.store.settings.speechProsody, cloudEngine: Boolean(p.speech.cloud) }; })()`);
+  return { ok: state?.enabled === false && state?.cloudEngine === false && Boolean(state?.label)
+    && !/云端/.test(state?.label) && state?.prosody === true,
+    detail: state ? `云端开关=${state.enabled} · 云端引擎=${state.cloudEngine} · 引擎=${state.label} · 韵律=${state.prosody} · 地址留空=${!state.url} 密钥留空=${!state.key}` : "插件实例未加载" };
 });
 
 await step("状态栏索引提示", async () => {
@@ -332,7 +336,7 @@ await step("插件数据与 vault 文件齐备", async () => {
   return { ok: missing.length === 0, detail: missing.length ? `缺少：${missing.join("、")}` : `${files.length} 个文件齐备` };
 });
 
-// 验收结束：先清除分类选中项，再停回「今日要处理」并展开清单，方便人工继续看。
+// 验收结束：先清除分类选中项，再停回「今日」并展开清单，方便人工继续看。
 await evalJS(`(() => { const a = ${APP}; a.commands.executeCommandById('knowledge-workbench:open-workbench-stats'); return true; })()`, true);
 await sleep(320);
 await evalJS(`(() => { const b = [...document.querySelectorAll('.kw-open-btn')].find(x => x.textContent.includes('返回分类列表')); if (b) b.click(); return true; })()`, true);

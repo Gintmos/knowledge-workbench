@@ -1,10 +1,11 @@
 /**
  * 听笔记服务：SP 状态机 / 句群分块 / token 隔离 / 断点续读 / seekCommit()。
  *
- * v1.0.1 双引擎：
- * - 云端神经 TTS（用户显式开启、填好地址与密钥）→ 真人级语气；
- * - 云端不可用 / 离线 / 失败 → 自动回退系统语音 + 规则式韵律（方案 A）；
- * - 两端都不可用（典型为 Android WebView）→ 中文提示 + 复制 / 导出朗读稿。
+ * v1.0.2：云端神经 TTS 搁置，生产路径不再注入云端引擎。
+ * - 系统语音 + 规则式韵律（方案 A）为主路径；
+ * - 系统语音不可用（典型为 Android WebView）→ 中文提示 + 复制 / 导出朗读稿，
+ *   交给系统「随选朗读」发声；
+ * - cloudEngine 注入点保留为兼容入口（当前未接线），便于日后有服务时恢复。
  * 服务层不触碰 window、不直接发网络请求、不使用 Node/Electron API。
  */
 import type { SpeechChunk } from "../speech/chunks";
@@ -29,16 +30,16 @@ import type {
 } from "../speech/types";
 
 const UNSUPPORTED_TEXT =
-  "当前设备不支持朗读：可开启云端神经语音（设置 → 朗读），或复制 / 保存朗读稿交给系统「随选朗读」。";
+  "当前设备不支持朗读：请复制 / 保存朗读稿，交给系统「随选朗读」发声。";
 const MOBILE_TEXT =
-  "移动端系统语音可能不可用；若无声请开启云端神经语音，或使用系统朗读。";
+  "移动端系统语音可能不可用；若无声请使用朗读稿替代路径交给系统朗读。";
 const NO_VOICES_TEXT =
-  "当前设备不支持朗读：系统未提供可用音色（Android WebView 常见）。请开启云端神经语音，或复制 / 保存朗读稿交给系统朗读。";
+  "当前设备不支持朗读：系统未提供可用音色（Android WebView 常见）。请复制 / 保存朗读稿交给系统朗读。";
 
 export interface SpeechServiceOptions {
   /** 本地 / 系统语音引擎（可注入内存实现以便单测）。 */
   engine: SpeechEngine | null;
-  /** 可选云端神经语音引擎；未配置时 supported() 为 false。 */
+  /** 兼容入口：v1.0.2 起生产路径不注入云端引擎（功能已搁置）。 */
   cloudEngine?: SpeechEngine | null;
   mobile: boolean;
   progress: SpeechProgressStore;
@@ -104,7 +105,7 @@ export class SpeechService {
     return this.cloud?.supported() === true || this.local?.supported() === true;
   }
 
-  /** 云端优先；云端失败或离线时退回本地系统语音（方案 A）。 */
+  /** 云端优先（搁置路径，生产为 null）；云端失败或离线时退回本地系统语音。 */
   private activeEngine(): SpeechEngine | null {
     if (this.cloud && !this.cloudFailed && this.cloud.supported()) {
       return this.cloud;

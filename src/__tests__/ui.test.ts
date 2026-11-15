@@ -4,7 +4,8 @@ import { chartSlices } from "../domain/ClassifierService";
 import {
   TAB_LABELS,
   TAB_ORDER,
-  chartGeometry,
+  barRowsMax,
+  barWidthPercent,
   filterPaths,
   groupToday,
   isTab,
@@ -15,7 +16,6 @@ import {
   restoreViewState,
   sortHistory,
   todayCardTitle,
-  truncateLabel,
   writeCategory,
 } from "../domain/uiModel";
 import { CHART_LIMIT, defaultData } from "../types";
@@ -88,7 +88,7 @@ test("四个页签顺序固定：知识库已取消、浏览历史在最右", ()
 
 test("今日卡片标题折叠前后一致，且不带「项待处理」计数备注", () => {
   const title = todayCardTitle("2026-11-15");
-  assert.equal(title, "今日要处理 · 2026-11-15");
+  assert.equal(title, "今日 · 2026-11-15");
   assert.equal(title, todayCardTitle("2026-11-15"), "折叠前后应取同一个标题");
   assert.equal(title.includes("项待处理"), false);
   assert.equal(title.includes("（"), false);
@@ -201,47 +201,30 @@ test("filterPaths 不筛选时返回 null，未知分类返回空集合", () => 
   assert.equal(filterPaths(data, "不存在")!.size, 0);
 });
 
-test("标签按槽宽截断，末尾省略号且不超过可用字符数", () => {
-  assert.equal(truncateLabel("项目", 4), "项目");
-  assert.equal(truncateLabel("很长很长的分类名", 3), "很长…");
-  assert.equal([...truncateLabel("很长很长的分类名", 3)].length, 3);
-  assert.equal(truncateLabel("超长", 1), "超");
+test("v1.0.2：今日页签与卡片标题统一为「今日」", () => {
+  assert.equal(TAB_LABELS.today, "今日");
+  assert.equal(todayCardTitle("2026-11-15"), "今日 · 2026-11-15");
+  assert.equal(TAB_LABELS.history, "浏览历史");
 });
 
-test("全量柱状图几何：所有分类都出柱、坐标有限、柱底对齐基线", () => {
-  const geo = chartGeometry(slices([9, 7, 5, 4, 3, 2, 2, 1, 1, 1, 1, 1]));
-  assert.equal(geo.bars.length, 12, "不再归并 Top 10 / 其他");
-  assert.equal(geo.totalSlices, 12);
-  assert.equal(geo.truncated, false);
-  assert.ok(geo.width >= 12 * 62, "宽度按类别数扩展，由容器横向滚动");
-  const plotBottom = geo.plotBottom;
-  for (const bar of geo.bars) {
-    assert.ok(Number.isFinite(bar.x) && Number.isFinite(bar.y));
-    assert.ok(bar.width > 0 && bar.height > 0);
-    assert.ok(Math.abs(bar.y + bar.height - plotBottom) < 1e-6);
-  }
-  const tallest = geo.bars.find((bar) => bar.key === "分类0")!;
-  const smallest = geo.bars.find((bar) => bar.key === "分类1")!;
-  assert.ok(tallest.height > smallest.height);
-  assert.equal(tallest.count, 9);
+test("横向条形图宽度与卡片内最大值成比例，且始终可见、无 NaN", () => {
+  assert.equal(barWidthPercent(20, 20), 100);
+  assert.equal(barWidthPercent(10, 20), 50);
+  assert.equal(barWidthPercent(6, 20), 30);
+  assert.equal(barWidthPercent(1, 20), 5);
+  assert.equal(barWidthPercent(1, 1000), 3, "极小比例也至少给 3% 可见宽度");
+  assert.equal(barWidthPercent(50, 20), 100, "超过最大值时钳到 100%");
+  assert.equal(barWidthPercent(0, 20), 0);
+  assert.equal(barWidthPercent(-1, 20), 0);
+  assert.equal(barWidthPercent(3, 0), 0);
+  assert.equal(barWidthPercent(Number.NaN, 20), 0);
+  assert.equal(Number.isFinite(barWidthPercent(3, 7)), true);
 });
 
-test("柱状图标签不重叠：估算宽度 ≤ slot-gap，中心间距 = slot", () => {
-  const options = { width: 320, charWidth: 9, gap: 8 };
-  const geo = chartGeometry(slices([12, 9, 8, 6, 5, 4, 3, 2, 1, 1]), options);
-  for (const bar of geo.bars) {
-    const estimated = [...bar.label].length * (options.charWidth ?? 9);
-    assert.ok(
-      estimated <= geo.slot - options.gap + 1e-6,
-      `${bar.label} 估算宽度 ${estimated} 超过槽宽 ${geo.slot - options.gap}`,
-    );
-    assert.equal(bar.label.includes("\n"), false);
-  }
-  for (let i = 1; i < geo.bars.length; i += 1) {
-    const distance = geo.bars[i].centerX - geo.bars[i - 1].centerX;
-    assert.ok(Math.abs(distance - geo.slot) < 1e-6);
-    assert.ok(distance > 0);
-  }
+test("横向条形图基准最大值：空组为 1，多组可合并比较", () => {
+  assert.equal(barRowsMax([]), 1);
+  assert.equal(barRowsMax([{ count: 20 }, { count: 11 }, { count: 8 }]), 20);
+  assert.equal(barRowsMax([{ count: 4 }, { count: 9 }, { count: 2 }]), 9);
 });
 
 test("旧版有限图表 chartSlices 仍压缩为 10 柱，计数总和守恒", () => {
@@ -255,21 +238,5 @@ test("旧版有限图表 chartSlices 仍压缩为 10 柱，计数总和守恒", 
   assert.equal(chart.length, CHART_LIMIT);
   const sum = chart.reduce((total, slice) => total + slice.count, 0);
   assert.equal(sum, notes.length, "Top 10 不能丢掉逐篇计数");
-  const geo = chartGeometry(chart);
-  assert.equal(geo.bars.length, CHART_LIMIT);
-  assert.equal(
-    geo.bars.reduce((total, bar) => total + bar.count, 0),
-    notes.length,
-  );
-  assert.equal(geo.bars[geo.bars.length - 1].key, "其他");
-});
-
-test("空图表与单柱图表不产生非法坐标", () => {
-  const empty = chartGeometry([]);
-  assert.equal(empty.bars.length, 0);
-  assert.ok(empty.slot > 0);
-  const single = chartGeometry(slices([3]));
-  assert.equal(single.bars.length, 1);
-  assert.ok(single.bars[0].x >= 0);
-  assert.ok(single.bars[0].height > 0);
+  assert.equal(chart[chart.length - 1].key, "其他");
 });

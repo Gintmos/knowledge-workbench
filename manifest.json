@@ -1,9 +1,9 @@
 {
   "id": "knowledge-workbench",
   "name": "知识管理工作台",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "minAppVersion": "1.5.0",
-  "description": "按标签分类知识，追踪待办与复习计划，并在库内打开与朗读笔记。数据全部存于 vault，云端神经朗读为可选功能。",
+  "description": "按标签分类知识，追踪待办与复习计划，并在库内打开与朗读笔记。数据全部存于 vault，零网络请求。",
   "author": "Gintmos",
   "authorUrl": "https://github.com/Gintmos",
   "isDesktopOnly": false

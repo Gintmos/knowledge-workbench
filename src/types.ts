@@ -11,12 +11,8 @@ export const INDEX_VERSION = 1;
  */
 export const SUMMARY_ALGO = 2;
 export const HISTORY_LIMIT = 20;
-/** 旧版「Top 10 + 其他」语义保留给有限图表；新版统计卡片使用全量柱状图。 */
+/** 旧版「Top 10 + 其他」语义保留给有限图表；统计卡片使用全量列表 + 横向条形。 */
 export const CHART_LIMIT = 10;
-/** 全量柱状图每根柱子的最小槽宽（px），超出容器宽度时横向滚动。 */
-export const CHART_MIN_SLOT = 62;
-/** 防御上限：极端库只画前 200 根柱子，列表仍是全量。 */
-export const CHART_MAX_BARS = 200;
 export const SUMMARY_LIMIT = 120;
 export const INDEX_PATH_DEFAULT = "知识管理工作台/index.json";
 
@@ -60,7 +56,7 @@ export interface WorkbenchSettings {
   speechVoiceName: string;
   /** 块间停顿上限（毫秒）；0 表示关闭，生产默认 420。 */
   speechPauseMs: number;
-  /** 可选云端神经 TTS：默认全部关闭，需用户显式开启并填写自有的服务地址与密钥。 */
+  /** v1.0.2 起云端神经 TTS 已搁置：仅保留字段兼容旧 data.json，运行时不接线。 */
   cloudTtsEnabled: boolean;
   cloudTtsUrl: string;
   cloudTtsKey: string;

@@ -192,70 +192,6 @@
   margin-top: 4px;
 }
 
-/* 内联 SVG 全量柱状图：颜色全部走主题变量；超出宽度时横向滚动。 */
-.kw-chart-host,
-.kw-chart-scroll {
-  width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  margin: var(--size-4-2, 8px) 0;
-}
-
-.kw-chart-scroll::-webkit-scrollbar {
-  height: 8px;
-}
-
-.kw-chart-scroll::-webkit-scrollbar-thumb {
-  background: var(--background-modifier-border);
-  border-radius: var(--radius-s, 4px);
-}
-
-.kw-chart {
-  display: block;
-  width: auto;
-  max-width: none;
-  height: auto;
-  max-height: 220px;
-}
-
-.kw-chart-axis {
-  stroke: var(--background-modifier-border);
-  stroke-width: 1;
-}
-
-.kw-chart-col {
-  cursor: pointer;
-}
-
-.kw-chart-col:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
-}
-
-.kw-chart-bar {
-  fill: var(--interactive-accent);
-}
-
-.kw-chart-col.is-active .kw-chart-bar {
-  fill: var(--text-accent);
-}
-
-.kw-chart-col:hover .kw-chart-bar {
-  opacity: 0.75;
-}
-
-.kw-chart-value,
-.kw-chart-label {
-  fill: var(--text-muted);
-  font-size: 10px;
-}
-
-.kw-chart-col.is-active .kw-chart-label {
-  fill: var(--text-normal);
-  font-weight: 600;
-}
-
 .kw-detail-head {
   display: flex;
   align-items: baseline;
@@ -306,17 +242,20 @@
   margin-top: var(--size-4-2, 8px);
 }
 
+/* 统计卡片下半部分：列表每行一条横向条形图，颜色全部走主题变量。 */
 .kw-count-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--size-4-2, 8px);
-  padding: 3px 0;
+  padding: 4px 0;
   border-bottom: 1px solid var(--background-modifier-border);
   font-size: var(--font-ui-small);
 }
 
 .kw-count-key {
+  flex: 0 1 34%;
+  min-width: 0;
   color: var(--text-normal);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -333,8 +272,37 @@
   text-decoration: underline;
 }
 
+.kw-count-bar {
+  flex: 1 1 auto;
+  min-width: 36px;
+  height: 12px;
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-border);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.kw-count-bar-fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: var(--radius-s, 4px);
+  background: var(--interactive-accent);
+  pointer-events: none;
+}
+
+.kw-count-bar:hover .kw-count-bar-fill {
+  opacity: 0.75;
+}
+
+.kw-count-bar:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
 .kw-count-value {
   flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
   color: var(--text-muted);
 }
 

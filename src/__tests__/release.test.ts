@@ -389,3 +389,44 @@ test("P6 14 · 发布材料说明零网络、.ics 替代推送与手机朗读限
   assert.ok(source("LICENSE").length > 200);
   assert.ok(source("CHANGELOG.md").includes("1.0.0"));
 });
+
+// ── v1.0.2 三项改动回归 ─────────────────────────────────────
+test("v1.0.2 01 · 今日页签与卡片标题为「今日」，清单不再有「打开原文」按钮", () => {
+  const model = source(join("src", "domain", "uiModel.ts"));
+  assert.ok(model.includes('today: "今日"'));
+  assert.ok(model.includes("`今日 · ${day}`"));
+  const view = source(join("src", "ui", "WorkbenchView.ts"));
+  const history = source(join("src", "ui", "HistoryView.ts"));
+  assert.equal(view.includes('text: "打开原文"'), false);
+  assert.equal(history.includes('text: "打开原文"'), false);
+  assert.equal(model.includes("今日要处理"), false);
+});
+
+test("v1.0.2 02 · 统计页只有列表内横向条形，没有上方纵向 SVG 柱状图", () => {
+  const view = source(join("src", "ui", "WorkbenchView.ts"));
+  const chart = source(join("src", "ui", "Chart.ts"));
+  const css = source("styles.css");
+  assert.equal(view.includes("renderChart("), false);
+  assert.equal(view.includes("kw-chart-scroll"), false);
+  assert.ok(view.includes("renderBarMeter("));
+  assert.ok(chart.includes("kw-count-bar-fill"));
+  assert.ok(css.includes(".kw-count-bar-fill"));
+  assert.equal(css.includes(".kw-chart-bar"), false);
+});
+
+test("v1.0.2 03 · 云端神经朗读搁置：main.ts 不接线、设置页无地址/密钥输入", () => {
+  const main = source(join("src", "main.ts"));
+  const settings = source(join("src", "ui", "SettingsTab.ts"));
+  assert.equal(main.includes("createCloudTtsEngine"), false);
+  assert.equal(main.includes("cloudEngine:"), false);
+  assert.equal(settings.includes("启用云端神经语音"), false);
+  assert.equal(settings.includes("API 密钥"), false);
+  assert.ok(settings.includes("已搁置"));
+  assert.ok(source(join("src", "domain", "pluginData.ts")).includes("cloudTtsEnabled: false"));
+});
+
+test("v1.0.2 04 · README / CHANGELOG 说明云端朗读已搁置与严格零网络", () => {
+  const readme = source("README.md");
+  assert.ok(/搁置/.test(readme) && /零网络/.test(readme));
+  assert.ok(source("CHANGELOG.md").includes("1.0.2"));
+});
