@@ -1,0 +1,10 @@
+{
+  "id": "knowledge-workbench",
+  "name": "知识管理工作台",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "按标签分类知识，追踪待办与复习计划，并在库内打开与朗读笔记。数据全部存于 vault。",
+  "author": "Gintmos",
+  "authorUrl": "https://github.com/Gintmos",
+  "isDesktopOnly": false
+}

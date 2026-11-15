@@ -1,0 +1,10 @@
+node_modules/
+main.js
+main.js.map
+data.json
+test-vault/
+.tmp-tests/
+.tmp-bench/
+dist/
+*.log
+.DS_Store
