@@ -339,8 +339,10 @@ test("P6 08 · manifest 字段齐备，双端标志与最低版本正确", () =>
   assert.ok(/[.!?)\]]$/.test(manifest.description), "描述须以英文标点 . ! ? ( ) ] 结尾");
   assert.ok(!/obsidian/i.test(manifest.description), "描述不得含 Obsidian 字样");
   assert.ok(manifest.description.length <= 250, "描述不超过 250 字符");
-  const [major, minor, patch] = manifest.minAppVersion.split(".").map(Number);
-  assert.ok(major > 1 || (major === 1 && (minor > 4 || (minor === 4 && patch >= 4))), "processFrontMatter 需 ≥1.4.4");
+  const [major, minor] = manifest.minAppVersion.split(".").map(Number);
+  // workspace.revealLeaf 的 Promise 重载自 1.7.2 起提供；声明更低版本会触发社区审核
+  // obsidianmd/no-unsupported-api Error，故 minAppVersion 必须 ≥1.7.2。
+  assert.ok(major > 1 || (major === 1 && minor >= 7), "minAppVersion 需 ≥1.7.2（revealLeaf 签名要求）");
 });
 
 test("P6 09 · versions.json / package.json 与 manifest 版本一致", () => {

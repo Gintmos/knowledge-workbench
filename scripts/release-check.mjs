@@ -200,7 +200,9 @@ check("清单", "插件名仅用 Basic Latin 且标点限 - + ()（官方命名�
 check("清单", "插件名不以 Plugin 结尾 / Obsi 开头 / dian 结尾", !/plugin$/i.test(manifest.name ?? "") && !/^obs?i/i.test(manifest.name ?? "") && !/dian$/i.test(manifest.name ?? ""), String(manifest.name));
 check("清单", "描述以英文标点结尾且不含 Obsidian / 不超 250 字符", /[.!?)\]]$/.test(manifest.description ?? "") && !/obsidian/i.test(manifest.description ?? "") && (manifest.description ?? "").length <= 250, String(manifest.description).slice(-40));
 const minParts = String(manifest.minAppVersion ?? "0.0.0").split(".").map(Number);
-check("清单", "minAppVersion ≥ 1.4.4（processFrontMatter 引入版）", minParts[0] > 1 || (minParts[0] === 1 && (minParts[1] > 4 || (minParts[1] === 4 && minParts[2] >= 4))), String(manifest.minAppVersion));
+// workspace.revealLeaf 的 Promise 重载自 1.7.2 起提供，声明更低版本会被社区审核判
+// obsidianmd/no-unsupported-api Error（1.0.4 审核失败的真实原因）。
+check("清单", "minAppVersion ≥ 1.7.2（revealLeaf 签名要求）", minParts[0] > 1 || (minParts[0] === 1 && minParts[1] >= 7), String(manifest.minAppVersion));
 check("清单", "无运行时 dependencies（零外部依赖）", !pkg.dependencies || Object.keys(pkg.dependencies).length === 0, JSON.stringify(pkg.dependencies ?? {}));
 
 // ── 5. 发布材料齐备（定稿 P6-6）───────────────────────────────

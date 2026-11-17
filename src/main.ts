@@ -233,13 +233,13 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     if (existing.length > 0) {
       const view = existing[0].view;
       if (view instanceof WorkbenchView) view.setActiveTab(tab);
-      workspace.revealLeaf(existing[0]);
+      await workspace.revealLeaf(existing[0]);
       return;
     }
     const leaf = workspace.getRightLeaf(false);
     if (!leaf) return;
     await leaf.setViewState({ type: VIEW_TYPE_WORKBENCH, active: true });
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
   }
 
   async copyIcs(): Promise<void> {

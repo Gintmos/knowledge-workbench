@@ -1,10 +1,20 @@
-# 知识管理工作台（Obsidian 插件）
+# Knowledge Workbench
+
+**Knowledge Workbench** is a local-first Obsidian plugin that brings the capabilities of the online knowledge workbench into your vault: organise notes by tags and folders, track due and overdue tasks, schedule spaced reviews, and read notes in place. It is fully offline — **zero network requests, no backend, no telemetry, and no runtime dependencies**. No note content ever leaves your device, and all data is stored inside your vault.
+
+Key features: four tabs (Today, Review, Statistics, History), rule-based summaries with no LLM, all-day `.ics` reminders with advance alarms, follow-the-slot reading with a fallback transcript for Android, and horizontal bar charts for every category. Nothing is downloaded or uploaded, and the plugin never runs in the background.
+
+Privacy: the source and shipped `main.js` contain no `fetch`, `XMLHttpRequest`, `localStorage`, `indexedDB`, Node/Electron APIs, or hard-coded external URLs. All Markdown rendering goes through Obsidian's own `MarkdownRenderer`. There is no account system and no analytics.
+
+> Requires Obsidian `1.7.2` or later (`workspace.revealLeaf` needs 1.7.2+). `isDesktopOnly: false` — works on both desktop and mobile.
+
+---
 
 把「在线知识管理工作台」的能力搬进 Obsidian 原生插件：**按标签/文件夹分类知识、追踪待办与过时提醒、安排复习、在库内打开并朗读笔记**。
 
 **纯本地、零后端、零网络请求、零运行时依赖。** 插件不会联网、不会上传笔记、没有遥测，也不会在后台常驻。数据全部存在你的 vault 里，跨设备同步由你既有的同步方案负责。**v1.0.2 起云端神经朗读已搁置**：没有自有 TTS 服务地址与密钥，也没有不依赖密钥的可用替代方案，因此该路径已从运行时移除，产物中不含任何联网入口。
 
-> 最低支持 Obsidian `1.5.0`（`processFrontMatter` 自 1.4.4 起提供）。`isDesktopOnly: false`，桌面与手机端均可安装。
+> 最低支持 Obsidian `1.7.2`（`workspace.revealLeaf` 的 Promise 重载自 1.7.2 起提供）。`isDesktopOnly: false`，桌面与手机端均可安装。
 
 ## 安装
 
@@ -13,7 +23,7 @@
 1. **手动复制到 vault**（推荐先这样试用）
    把 `main.js`、`manifest.json`、`styles.css` 放进 `<vault>/.obsidian/plugins/knowledge-workbench/`，重启 Obsidian，在「设置 → 第三方插件」中启用。也可使用仓库脚本：`node scripts/link-vault.mjs "<vault 绝对路径>"`。
 2. **BRAT 灰度**：在 BRAT 中添加 `https://github.com/Gintmos/knowledge-workbench`，可自动跟随 Release 更新，适合小范围试用。
-3. **GitHub Release**：从 [Releases 页面](https://github.com/Gintmos/knowledge-workbench/releases) 下载 `knowledge-workbench-1.0.4.zip`，解压后三个文件直接放入上述插件目录。Release 的 tag 必须与 `manifest.json` 的 `version` 一致。
+3. **GitHub Release**：从 [Releases 页面](https://github.com/Gintmos/knowledge-workbench/releases) 下载 `knowledge-workbench-1.0.5.zip`，解压后三个文件直接放入上述插件目录。Release 的 tag 必须与 `manifest.json` 的 `version` 一致。
 
 安装后可通过左侧 ribbon 的「打开知识管理工作台」、命令面板「打开知识管理工作台」或四个页签命令进入。
 

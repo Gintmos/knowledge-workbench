@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。版本号与 `manifest.json` / `versions.json` 保持一致，GitHub Release 的 tag 必须等于版本号。
 
+## 1.0.5 — 2026-11-17
+
+社区目录 Release 自动审核修复，无功能与数据格式变更（vault 内数据、命令、插件 id 均与 1.0.4 相同）。
+
+### 变更
+
+- **`minAppVersion` 由 1.5.0 提升为 1.7.2**：1.0.4 的社区审核在 SOURCE CODE 分组报唯一 Error `Uses Obsidian APIs newer than the declared minAppVersion`（规则 `obsidianmd/no-unsupported-api`，定位 `src/main.ts:236`、`src/main.ts:242`）。`workspace.revealLeaf()` 的 `Promise<void>` 重载自 Obsidian 1.7.2 起提供（`@since 1.7.2`），而清单声明 1.5.0，版本不一致被判错。提升声明后消除该 Error。
+- **`revealLeaf` 两处调用加 `await`**：同时消除 `Promises must be awaited` 警告，并保证在右侧栏打开视图后再聚焦。
+- **README 英文化**：标题改为与 manifest 一致的 `Knowledge Workbench`，补充英文简介、功能与隐私说明，消除「README does not appear to contain English text」与「README title does not match the manifest name」两条 Warning。
+- 发布自检与单元测试的 `minAppVersion` 门槛由 1.4.4 改为 1.7.2，防止回归。
+
+### 未采纳的审核项
+
+- Warning：`builtin-modules`、`globalThis`、`Vault#configDir`、`getSettingDefinitions()`、`requestAnimationFrame()`、CSS `display:contents` 等，均为建议级，不影响发布，本版不改。
+- Recommendation：缺少 artifact attestation、Release 附带 zip、Vault 枚举与剪贴板访问说明，均不阻塞。
+
 ## 1.0.4 — 2026-11-16
 
 社区目录命名修复，无功能与数据格式变更（vault 内数据、命令、id 均与 1.0.3 相同）。
