@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type KnowledgeWorkbenchPlugin from "../main";
 
 /** 功能名 + 控件 + (i) 折叠说明；说明默认隐藏，点 (i) 才展开。 */
@@ -35,18 +35,29 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     const settings = plugin.store.settings;
     containerEl.empty();
 
-    // 官方规范：设置页顶部不放插件名 /「常规」「设置」这类顶层标题；
-    // 常规项直接置顶、不加 heading，后续分组才用 setHeading() 且标题不含「设置」。
+    // v1.0.6：顶部改为简短定位 + 快速上手，减少「要素养才能用」的门槛。
     containerEl.createDiv({
       cls: "kw-settings-intro",
-      text: "纯本地 vault 数据：零后端、零网络请求，桌面与手机端行为一致；云端神经朗读已搁置，插件不向任何服务发送笔记或朗读文本。点击每项右侧的 (i) 查看说明。",
+      text: "纯本地 vault 数据：零后端、零网络请求，桌面与手机端一致。点每项右侧的 (i) 看详细说明。",
+    });
+    const quick = containerEl.createDiv({ cls: "kw-quickstart" });
+    quick.createDiv({ cls: "kw-quickstart-title", text: "快速上手 3 步" });
+    const ol = quick.createEl("ol", { cls: "kw-quickstart-list" });
+    ol.createEl("li", {
+      text: "给需要跟踪的笔记加 frontmatter 日期：due（到期）或 review（复习）。",
+    });
+    ol.createEl("li", {
+      text: "在正文任务行写 @due(2026-11-30) 或 @every(每周)，即进入「催办 / 待办」与日历。",
+    });
+    ol.createEl("li", {
+      text: "在下方把 .ics 提醒导入手机 / 桌面系统日历，关掉 Obsidian 也能收到提醒。",
     });
 
     // 操作结果反馈放在说明区之外，便于区分「配置说明」与「执行结果」。
     const feedback = containerEl.createDiv({ cls: "kw-settings-feedback" });
     feedback.setText("操作结果会显示在这里。");
 
-    // ── 常规（置顶，不加标题）────────────────────────────────
+    // ── 每天用（置顶，不加标题）──────────────────────────────
     const classify = new Setting(containerEl)
       .setName("分类维度")
       .addDropdown((dropdown) =>
@@ -68,22 +79,41 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     );
 
     const stale = new Setting(containerEl)
-      .setName("过时提醒阈值（天）")
+      .setName("催办默认周期（天）")
+      .setDesc("任务只写了「每周」等周期词、没有明确日期时，用笔记日期加这个周期估算下次到期。")
       .addText((text) =>
         text
-          .setPlaceholder("90")
+          .setPlaceholder("30")
           .setValue(String(settings.staleDays))
           .onChange((value) => {
             const parsed = Number.parseInt(value, 10);
             plugin.store.updateSettings({
               staleDays: Number.isFinite(parsed) && parsed >= 0 ? parsed : settings.staleDays,
             });
+            plugin.index.invalidateTaskCache();
             plugin.workbench.recompute();
           }),
       );
     addInfo(
       stale,
-      "笔记 frontmatter 的 updated 字段距今天数超过阈值时列入「过时提醒」；updated 缺失时回退到文件最后修改时间。设为 0 表示只要不是今天更新就提醒。",
+      "v1.0.6：原「过时阈值」已改为催办周期。任务行写 @due(日期) 或 @every(周期) 时以此为准；仅识别中文周期词时，用笔记 created/updated 日期加此周期的整倍数估算下次到期。修改后需重建索引才对已缓存笔记生效。",
+    );
+
+    const autoInfer = new Setting(containerEl)
+      .setName("自动识别任务周期词")
+      .setDesc("把「每周复盘」这类带周期词的任务自动算入催办 / 待办。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(settings.taskAutoInfer)
+          .onChange((value) => {
+            plugin.store.updateSettings({ taskAutoInfer: value });
+            plugin.index.invalidateTaskCache();
+            feedback.setText(value ? "已开启周期词自动识别，正在重建索引。" : "已关闭周期词自动识别。");
+          }),
+      );
+    addInfo(
+      autoInfer,
+      "识别正文任务里的「每天 / 每周 / 每月 / 每季度 / 每年」及 daily / weekly / monthly 等词，按周期推断下次到期。若你的任务里这些词只是叙述而非周期，可关闭以免误报；关闭后只有 @due / @every 标记的任务进入催办 / 待办。",
     );
 
     const intervals = new Setting(containerEl)
@@ -205,7 +235,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       );
     addInfo(
       icsEnabled,
-      "把待办、复习与过时项写入 vault 内的 .ics，含提前 1 天的 VALARM。插件不能常驻后台，最终提醒由系统日历触发；关闭 Obsidian 后不会推送，启动时应用内会有汇总提示。",
+      "把逾期、到期、催办、复习与有日期的待办任务写入 vault 内的 .ics，含提前 1 天的 VALARM；无日期的待办不进日历。插件不能常驻后台，最终提醒由系统日历触发；关闭 Obsidian 后不会推送，启动时应用内会有汇总提示。",
     );
 
     const icsPath = new Setting(containerEl)
@@ -243,15 +273,48 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     // ── 朗读 ────────────────────────────────────────────────
     new Setting(containerEl).setName("朗读").setHeading();
 
-    // v1.0.2：没有可用的自有神经语音服务，云端朗读暂时搁置。
-    // 运行时不再接线、设置页不再提供无法使用的地址/密钥输入框。
-    const shelved = new Setting(containerEl).setName("真人级语气（已搁置）");
-    shelved.setDesc(
-      "真人级神经网络语音需要你自有的 TTS 服务地址与密钥。当前没有可用服务，云端朗读已从运行时移除，插件不发起任何网络请求。",
-    );
+    const engine = new Setting(containerEl)
+      .setName("朗读引擎")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("system", "系统语音（零配置）");
+        dropdown.addOption("piper", "Piper 本地语音（需先准备模型）");
+        dropdown.setValue(settings.speechEngine).onChange((value) => {
+          plugin.store.updateSettings({
+            speechEngine: value === "piper" ? "piper" : "system",
+          });
+          plugin.refreshSpeechEngine();
+          feedback.setText(
+            value === "piper"
+              ? "已选择 Piper 本地语音；模型未就绪时会自动回退系统语音。"
+              : "已切换回系统语音。",
+          );
+        });
+      });
     addInfo(
-      shelved,
-      "当前朗读只走系统语音 + 规则式韵律（方案 A）：句群分块、句末停顿、动态语速与音高、Natural / Neural 音色优选。Android WebView 通常没有系统语音，请用原文窗口的「复制朗读稿」「保存朗读稿到库内」，再交给系统「随选朗读 / 选择即朗读」发声。底层适配层保留在源码中，日后有服务时可重新接线，不影响当前版本。",
+      engine,
+      "系统语音零配置但音色普通；Piper 本地语音把 61MB 中文模型放在库内，完全离线、点即读，桌面和手机都能用。Piper 未就绪或朗读出错时自动回退系统语音。",
+    );
+
+    const modelDir = new Setting(containerEl)
+      .setName("Piper 模型目录")
+      .addText((text) =>
+        text
+          .setPlaceholder("知识管理工作台/tts")
+          .setValue(settings.piperModelDir)
+          .onChange((value) => {
+            plugin.store.updateSettings({ piperModelDir: value.trim() || "知识管理工作台/tts" });
+            plugin.refreshSpeechEngine();
+          }),
+      )
+      .addButton((button) =>
+        button.setButtonText("重新检测").onClick(() => {
+          plugin.refreshSpeechEngine();
+          new Notice("已重新检测本地语音；结果见下方「朗读能力」。");
+        }),
+      );
+    addInfo(
+      modelDir,
+      "运行 `npm run piper:setup -- <vault 路径>` 一次，把中文模型、Piper 音素 WASM 与 ONNX Runtime WASM 放进该目录。之后插件只读本地文件，不联网。默认目录：知识管理工作台/tts。",
     );
 
     const rate = new Setting(containerEl)
@@ -313,7 +376,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
       );
     addInfo(
       prosody,
-      "方案 A：句群分块（不再每个逗号都断）、句末停顿、动态语速与音高、Natural / Neural 音色优选。系统级参数合成能明显改善断句与节奏，但达不到神经网络 TTS 的真人语气；后者已搁置，需要自有服务才能启用。",
+      "句群分块（不再每个逗号都断）、句末停顿、动态语速与音高、Natural / Neural 音色优选。系统语音走参数合成；Piper 本地语音为神经网络合成，韵律由模型决定，规则式 pitch 不生效。云端神经朗读已搁置。",
     );
 
     const pause = new Setting(containerEl)
@@ -358,17 +421,61 @@ export class WorkbenchSettingTab extends PluginSettingTab {
     speechState.setDesc(
       `当前引擎：${speechSnapshot.engineLabel}。` +
         (speechSnapshot.supported
-          ? "系统语音配合规则式韵律（方案 A）。"
-          : "Android WebView 通常没有系统语音，请使用朗读稿替代路径交给系统朗读。"),
+          ? settings.speechEngine === "piper"
+            ? "Piper 本地语音已就绪，朗读完全离线。"
+            : "系统语音配合规则式韵律。"
+          : settings.speechEngine === "piper"
+            ? "Piper 模型尚未就绪或路径不对，请先运行模型准备脚本；期间仍可用系统语音。"
+            : "Android WebView 通常没有系统语音，请使用朗读稿替代路径交给系统朗读。"),
     );
     addInfo(
       speechState,
       "朗读在笔记原文窗口顶部控制：朗读 / 暂停 / 停止 / 可拖动进度条，关闭窗口自动保存断点。设备无语音时窗口会提供「复制朗读稿」「保存朗读稿到库内」，可交给系统「随选朗读」。插件卸载或禁用时会 cancel 语音并清除全部定时器。",
     );
 
+    // ── 导出 ────────────────────────────────────────────────
+    new Setting(containerEl).setName("导出").setHeading();
+    const exportCatalog = new Setting(containerEl)
+      .setName("导出笔记目录")
+      .setDesc("把所有已索引笔记按主分类生成一份 Markdown 目录，写入 vault。")
+      .addButton((button) =>
+        button.setButtonText("导出到 vault").onClick(() => {
+          void plugin.exportCatalog();
+          feedback.setText("已触发笔记目录导出，结果见右上角提示。");
+        }),
+      );
+    addInfo(
+      exportCatalog,
+      "生成「知识管理工作台/笔记目录.md」：按标签或文件夹（跟随当前分类维度）分组，每条含标题（可点开原文）、标签、日期与摘要。这是可重建的派生文件，每次导出覆盖旧文件，不会改动任何笔记。",
+    );
+
+    const manageTags = new Setting(containerEl)
+      .setName("批量管理标签")
+      .setDesc("重命名或合并标签，一次改掉所有相关笔记。")
+      .addButton((button) =>
+        button.setButtonText("打开管理器").onClick(() => {
+          plugin.openTagManager();
+        }),
+      );
+    addInfo(
+      manageTags,
+      "选择源标签（可多选做合并）与目标名称，先预览影响篇数，二次确认后分批写入。默认只改 frontmatter.tags，不碰正文内联 #标签；层级标签可选是否一并处理。",
+    );
+
+    // ── 关于 ────────────────────────────────────────────────
+    new Setting(containerEl).setName("关于").setHeading();
+    const about = new Setting(containerEl).setName("数据与隐私");
+    about.setDesc(
+      "纯本地：零后端、零网络请求，笔记与提醒都留在你的 vault。v1.0.2 起云端神经朗读已搁置，插件不向任何服务发送笔记或朗读文本；朗读只走系统语音 + 规则式韵律。",
+    );
+    addInfo(
+      about,
+      "真人级神经网络语音需要自有 TTS 服务地址与密钥，当前没有可用服务，已从运行时移除。底层适配层保留在源码中，日后有服务可重新接线。Android WebView 通常无系统语音，请用原文窗口的「复制 / 保存朗读稿」交给系统「随选朗读」。",
+    );
+
     containerEl.createDiv({
       cls: "kw-ver",
-      text: `知识管理工作台 v${plugin.manifest.version} · 零网络请求 · 云端神经朗读已搁置`,
+      text: `知识管理工作台 v${plugin.manifest.version} · 零网络请求`,
     });
   }
 }

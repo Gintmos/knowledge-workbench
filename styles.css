@@ -653,3 +653,159 @@
     margin-left: 0;
   }
 }
+
+/* ── v1.0.6：就地完成按钮 / 运行信息折叠 / 催办待办标识 ── */
+.kw-resolve-btn {
+  float: right;
+  margin-left: var(--size-4-2, 8px);
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.kw-resolve-btn:hover {
+  background: var(--interactive-hover);
+}
+
+.kw-today-row::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.kw-runtime-info {
+  margin-top: var(--size-4-2, 8px);
+}
+
+.kw-runtime-toggle {
+  padding: 2px 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.kw-runtime-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--size-4-2, 8px);
+  margin-top: var(--size-4-2, 8px);
+}
+
+.kw-runtime-body[hidden] {
+  display: none;
+}
+
+.kw-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2, 8px);
+}
+
+.kw-manage-tags {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.kw-manage-tags:hover {
+  background: var(--interactive-hover);
+}
+
+/* ── v1.0.6：设置页快速上手 ── */
+.kw-quickstart {
+  padding: var(--size-4-3, 12px);
+  margin-bottom: var(--size-4-3, 12px);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-secondary);
+}
+
+.kw-quickstart-title {
+  font-weight: 600;
+  margin-bottom: var(--size-4-2, 8px);
+}
+
+.kw-quickstart-list {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.7;
+}
+
+/* ── v1.0.6：标签管理弹窗 ── */
+.kw-tag-modal {
+  max-width: 460px;
+}
+
+.kw-tag-modal h2 {
+  margin-top: 0;
+}
+
+.kw-tag-section {
+  font-weight: 600;
+  margin: var(--size-4-3, 12px) 0 var(--size-4-1, 4px);
+}
+
+.kw-tag-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.kw-tag-chip {
+  padding: 3px 8px;
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.kw-tag-chip.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.kw-tag-target {
+  width: 100%;
+}
+
+.kw-tag-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: var(--size-4-2, 8px) 0;
+  line-height: 1.5;
+}
+
+.kw-tag-preview {
+  margin: var(--size-4-3, 12px) 0;
+  padding: var(--size-4-2, 8px) var(--size-4-3, 12px);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-secondary);
+}
+
+.kw-tag-preview-title {
+  font-weight: 600;
+  margin-bottom: var(--size-4-1, 4px);
+}
+
+.kw-tag-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2, 8px);
+}

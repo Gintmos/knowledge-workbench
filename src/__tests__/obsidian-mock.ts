@@ -58,6 +58,7 @@ export class TFile extends TAbstractFile {
 }
 
 export class MockVault extends Emitter {
+  readonly configDir = ".obsidian";
   readonly files = new Map<string, TFile>();
   readonly store = new Map<string, string>();
   readonly dirs = new Set<string>();

@@ -25,8 +25,9 @@ const DONE_STATUS = new Set([
 const KIND_ORDER: Record<TodayKind, number> = {
   overdue: 0,
   due: 1,
-  review: 2,
-  stale: 3,
+  followup: 2,
+  review: 3,
+  todo: 4,
 };
 
 function pad(value: number): string {
@@ -110,31 +111,75 @@ export function collectReview(notes: NoteRecord[], today: string): TodayItem[] {
   return items;
 }
 
-/** updated 优先，缺省回退到 file.stat.mtime 对应的本地日期。 */
+/** updated 优先，缺省回退到 file.stat.mtime 对应的本地日期（taskParse 锚点备用）。 */
 export function staleBaseDate(note: NoteRecord): string {
   return normalizeDate(note.updated) ?? dateFromTimestamp(note.mtime);
 }
 
-export function collectStale(
+const SOURCE_LABEL: Record<string, string> = {
+  due: "@due 指定",
+  every: "@every 循环",
+  frontmatter: "笔记字段",
+  "period-word": "周期词推断",
+  none: "未设日期",
+};
+
+/** 任务级收集：下次到期 < 今天 → 催办；到期 >= 今天或无日期 → 待办。 */
+function collectTasks(
   notes: NoteRecord[],
   today: string,
-  staleDays: number,
-): TodayItem[] {
-  const items: TodayItem[] = [];
+): { followup: TodayItem[]; todo: TodayItem[] } {
+  const followup: TodayItem[] = [];
+  const todo: TodayItem[] = [];
   for (const note of notes) {
-    const base = staleBaseDate(note);
-    const days = daysBetween(base, today);
-    if (days <= staleDays) continue;
-    items.push({
-      path: note.path,
-      title: note.title,
-      kind: "stale",
-      date: base,
-      days,
-      detail: `距上次更新 ${days} 天（阈值 ${staleDays} 天）`,
-    });
+    for (const task of note.tasks ?? []) {
+      const base: TodayItem = {
+        path: note.path,
+        title: task.text,
+        kind: "todo",
+        date: task.due,
+        days: task.due ? daysBetween(task.due, today) : 0,
+        detail: "",
+        task: {
+          text: task.text,
+          line: task.line,
+          periodDays: task.periodDays,
+          source: task.source,
+        },
+      };
+      if (task.due && task.due < today) {
+        followup.push({
+          ...base,
+          kind: "followup",
+          days: daysBetween(task.due, today),
+          detail: `逾期 ${daysBetween(task.due, today)} 天（原定 ${task.due}） · ${note.title} · ${SOURCE_LABEL[task.source] ?? task.source}`,
+        });
+      } else if (task.due) {
+        todo.push({
+          ...base,
+          kind: "todo",
+          detail: `${task.due === today ? "今日" : `下次 ${task.due}`} · ${note.title} · ${SOURCE_LABEL[task.source] ?? task.source}`,
+        });
+      } else {
+        todo.push({
+          ...base,
+          kind: "todo",
+          date: null,
+          days: 0,
+          detail: `未设日期 · ${note.title} · 补全 @due(日期) 或 @every(周期) 可加入日历`,
+        });
+      }
+    }
   }
-  return items;
+  return { followup, todo };
+}
+
+export function collectFollowup(notes: NoteRecord[], today: string): TodayItem[] {
+  return collectTasks(notes, today).followup;
+}
+
+export function collectTodo(notes: NoteRecord[], today: string): TodayItem[] {
+  return collectTasks(notes, today).todo;
 }
 
 function sortItems(items: TodayItem[]): TodayItem[] {
@@ -150,13 +195,24 @@ function sortItems(items: TodayItem[]): TodayItem[] {
 export function buildToday(
   notes: NoteRecord[],
   today: string,
-  settings: WorkbenchSettings,
+  _settings: WorkbenchSettings,
 ): TodaySummary {
   const dueAll = collectDue(notes, today);
   const overdue = sortItems(dueAll.filter((item) => item.kind === "overdue"));
   const due = sortItems(dueAll.filter((item) => item.kind === "due"));
-  const stale = sortItems(collectStale(notes, today, settings.staleDays));
   const review = sortItems(collectReview(notes, today));
-  const items = sortItems([...overdue, ...due, ...review, ...stale]);
-  return { day: today, items, overdue, due, stale, review, total: items.length };
+  const collected = collectTasks(notes, today);
+  const followup = sortItems(collected.followup);
+  const todo = sortItems(collected.todo);
+  const items = sortItems([...overdue, ...due, ...followup, ...review, ...todo]);
+  return {
+    day: today,
+    items,
+    overdue,
+    due,
+    followup,
+    todo,
+    review,
+    total: items.length,
+  };
 }

@@ -33,13 +33,13 @@ import {
   addDays,
   buildToday,
   collectDue,
+  collectFollowup,
   collectReview,
-  collectStale,
+  collectTodo,
   dateFromTimestamp,
   daysBetween,
   isDone,
   normalizeDate,
-  staleBaseDate,
 } from "../domain/TaskService";
 import {
   nextInterval,
@@ -73,6 +73,7 @@ function note(path: string, patch: Partial<NoteRecord> = {}): NoteRecord {
     reviewStage: patch.reviewStage ?? 0,
     interval: patch.interval ?? null,
     ease: patch.ease ?? null,
+    tasks: patch.tasks ?? [],
   };
 }
 
@@ -236,27 +237,34 @@ test("今日：逾期 / 今日到期 / 已完成排除 / 未来不列入", () =>
   assert.equal(isDone(null), false);
 });
 
-test("今日：过时提醒以 updated 优先、阈值边界、复习到期与分组排序", () => {
+test("今日：催办/待办按任务到期判定，复习到期与分组排序", () => {
   const notes = [
-    note("stale.md", { updated: "2026-01-01" }),
-    note("fresh.md", { updated: "2026-11-01" }),
-    note("by-mtime.md", { mtime: new Date(2026, 0, 1).getTime() }),
+    note("tasks.md", {
+      tasks: [
+        { text: "季度财报", due: "2026-11-10", periodDays: null, source: "due", line: 5 },
+        { text: "每周投递", due: "2026-11-20", periodDays: 7, source: "every", line: 9 },
+        { text: "未排期", due: null, periodDays: null, source: "none", line: 12 },
+      ],
+    }),
     note("review.md", { review: "2026-11-14" }),
     note("future-review.md", { review: "2026-12-01" }),
     note("task.md", { due: "2026-11-09" }),
   ];
-  const stale = collectStale(notes, TODAY, DEFAULT_SETTINGS.staleDays);
-  assert.ok(stale.some((item) => item.path === "stale.md"));
-  assert.ok(stale.some((item) => item.path === "by-mtime.md"));
-  assert.ok(!stale.some((item) => item.path === "fresh.md"));
-  assert.equal(staleBaseDate(notes[2]), "2026-01-01");
-  assert.equal(daysBetween("2026-08-17", TODAY), DEFAULT_SETTINGS.staleDays);
-  assert.equal(collectStale([note("edge.md", { updated: "2026-08-17" })], TODAY, 90).length, 0);
+  const followup = collectFollowup(notes, TODAY);
+  const todo = collectTodo(notes, TODAY);
+  assert.equal(followup.length, 1, "仅逾期任务进催办");
+  assert.equal(followup[0].task?.text, "季度财报");
+  assert.equal(followup[0].kind, "followup");
+  assert.equal(todo.length, 2, "未到期与无日期任务都进待办");
+  assert.equal(todo.filter((i) => i.task?.source === "none")[0].date, null);
+  assert.equal(collectFollowup([note("empty.md")], TODAY).length, 0);
 
   assert.equal(collectReview(notes, TODAY).length, 1);
   const today = buildToday(notes, TODAY, DEFAULT_SETTINGS);
   assert.equal(today.day, TODAY);
   assert.equal(today.overdue.length, 1);
+  assert.equal(today.followup.length, 1);
+  assert.equal(today.todo.length, 2);
   assert.equal(today.review.length, 1);
   assert.equal(today.total, today.items.length);
   assert.equal(today.items[0].kind, "overdue", "逾期排在最前");

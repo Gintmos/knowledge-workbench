@@ -34,6 +34,7 @@ function makeRecord(path: string, patch: Partial<NoteRecord> = {}): NoteRecord {
     reviewStage: patch.reviewStage ?? 0,
     interval: patch.interval ?? null,
     ease: patch.ease ?? null,
+    tasks: patch.tasks ?? [],
   };
 }
 

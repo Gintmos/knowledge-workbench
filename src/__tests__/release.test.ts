@@ -19,7 +19,7 @@ import { nextInterval } from "../domain/ReviewService";
 import { buildSnapshot, normalizeSnapshot } from "../domain/snapshot";
 import { cleanMarkdownLine, mdToPlainText } from "../domain/speechText";
 import { shouldRecompute, summarize } from "../domain/SummaryService";
-import { buildToday, collectStale, isDone } from "../domain/TaskService";
+import { buildToday, collectFollowup, isDone } from "../domain/TaskService";
 import {
   DETAIL_PAGE_SIZE,
   groupToday,
@@ -58,6 +58,7 @@ function note(path: string, patch: Partial<NoteRecord> = {}): NoteRecord {
     reviewStage: patch.reviewStage ?? 0,
     interval: patch.interval ?? null,
     ease: patch.ease ?? null,
+    tasks: patch.tasks ?? [],
   } as NoteRecord;
 }
 
@@ -107,14 +108,21 @@ test("基线 04 · 今日卡片标题折叠前后一致、不带项数备注", (
   assert.ok(!/\d+\s*项/.test(todayCardTitle(TODAY)));
 });
 
-test("基线 05 · 今日清单分组顺序为逾期 → 到期 → 复习 → 过时", () => {
+test("基线 05 · 今日清单分组顺序为逾期 → 到期 → 催办 → 复习 → 待办", () => {
   const groups = groupToday([
-    item("stale", "s.md"),
+    item("todo", "t2.md"),
+    item("followup", "f.md"),
     item("review", "r.md"),
     item("due", "d.md"),
     item("overdue", "o.md"),
   ]);
-  assert.deepEqual(groups.map(([kind]) => kind), ["overdue", "due", "review", "stale"]);
+  assert.deepEqual(groups.map(([kind]) => kind), [
+    "overdue",
+    "due",
+    "followup",
+    "review",
+    "todo",
+  ]);
 });
 
 test("基线 06 · 已完成状态含中文别名，不进入待办", () => {
@@ -125,12 +133,14 @@ test("基线 06 · 已完成状态含中文别名，不进入待办", () => {
   assert.equal(isDone(null), false);
 });
 
-test("基线 07 · 过时阈值默认 90 天，updated 缺失回退 mtime", () => {
-  const fresh = note("fresh.md", { updated: "2026-11-01" });
-  const old = note("old.md", { updated: "2026-01-01" });
-  const stale = collectStale([fresh, old], TODAY, DEFAULT_SETTINGS.staleDays);
-  assert.deepEqual(stale.map((s) => s.path), ["old.md"]);
-  assert.equal(collectStale([fresh, old], TODAY, 3650).length, 0);
+test("基线 07 · 催办默认周期 30 天，任务逾期才进催办", () => {
+  assert.equal(DEFAULT_SETTINGS.staleDays, 30);
+  const notes = [
+    note("old.md", { tasks: [{ text: "过期任务", due: "2026-11-01", periodDays: null, source: "due", line: 3 }] }),
+    note("fresh.md", { tasks: [{ text: "未来任务", due: "2026-11-20", periodDays: null, source: "due", line: 4 }] }),
+  ];
+  const followup = collectFollowup(notes, TODAY);
+  assert.deepEqual(followup.map((item) => item.task?.text), ["过期任务"]);
 });
 
 test("基线 08 · 复习固定间隔 1/3/7/15/30，到顶保持最后一档", () => {
@@ -193,19 +203,22 @@ test("基线 13 · Markdown 清洗：表格数据行保留文字，分隔行/代
   assert.equal(mdToPlainText("# 标题\n\n正文内容。").includes("正文内容"), true);
 });
 
-test("基线 14 · 领域快照汇总四项提醒且 .ics 事件数一致", () => {
+test("基线 14 · 领域快照汇总五类提醒，带日期项进 .ics", () => {
   const notes = [
     note("逾期.md", { due: "2026-11-10", status: "todo" }),
     note("今日.md", { due: TODAY, status: "todo" }),
     note("复习.md", { review: TODAY, status: "todo" }),
-    note("过时.md", { updated: "2026-01-01" }),
+    note("催办.md", { tasks: [{ text: "催办任务", due: "2026-11-01", periodDays: null, source: "due", line: 6 }] }),
+    note("待办.md", { tasks: [{ text: "无日期任务", due: null, periodDays: null, source: "none", line: 8 }] }),
   ];
   const today = buildToday(notes, TODAY, settings());
   assert.equal(today.overdue.length, 1);
   assert.equal(today.due.length, 1);
   assert.equal(today.review.length, 1);
-  assert.equal(today.stale.length, 1);
-  assert.equal(buildIcsEvents(today.items, TODAY).length, today.items.length);
+  assert.equal(today.followup.length, 1);
+  assert.equal(today.todo.length, 1, "无日期任务进待办但不进日历");
+  // 5 类共 5 项，其中无日期待办不生成 .ics 事件。
+  assert.equal(buildIcsEvents(today.items, TODAY).length, today.items.length - 1);
 });
 
 test("基线 15 · 浏览位置同一天恢复、跨天重置", () => {

@@ -8,6 +8,8 @@ import {
 } from "obsidian";
 import { scanInBatches, type ScanSignal } from "../domain/batchScan";
 import { computeDiff } from "../domain/indexDiff";
+import { parseTasks } from "../domain/taskParse";
+import { todayString } from "../domain/TaskService";
 import {
   buildNoteRecord,
   pickFrontmatterSummary,
@@ -34,6 +36,8 @@ export interface VaultIndexOptions {
   owner?: Component;
   /** 重命名时交给 StoreService 迁移以 path 为 key 的朗读断点与历史。 */
   onRename?: (oldPath: string, newPath: string, newTitle: string) => void;
+  /** v1.0.6：读取「周期词自动推断」开关；缺省视为开启。 */
+  taskAutoInfer?: () => boolean;
 }
 
 interface ScannedRecord {
@@ -52,7 +56,7 @@ function toCacheLike(cache: CachedMetadata | null): FileCacheLike | null {
   return {
     tags: cache.tags?.map((item) => ({ tag: item.tag })),
     frontmatter: cache.frontmatter
-      ? ({ ...cache.frontmatter } as Record<string, unknown>)
+      ? { ...cache.frontmatter }
       : null,
     headings: cache.headings?.map((item) => ({
       heading: item.heading,
@@ -78,6 +82,7 @@ export class VaultIndexService {
   private readonly indexPath: string;
   private readonly owner?: Component;
   private readonly onRename: VaultIndexOptions["onRename"];
+  private readonly taskAutoInfer: () => boolean;
 
   private records = new Map<string, NoteRecord>();
   private baseline: IndexSnapshot | null = null;
@@ -96,12 +101,15 @@ export class VaultIndexService {
   private scanSignal: ScanSignal | null = null;
   private disposed = false;
   private lastProgressEmit = 0;
+  /** v1.0.6：本轮任务解析基于的日期，写入快照供跨日判断是否重解析。 */
+  private taskDay = todayString();
 
   constructor(app: App, options: VaultIndexOptions) {
     this.app = app;
     this.indexPath = options.indexPath;
     this.owner = options.owner;
     this.onRename = options.onRename;
+    this.taskAutoInfer = options.taskAutoInfer ?? (() => true);
     this.status = emptyStatus(this.indexPath);
   }
 
@@ -142,6 +150,12 @@ export class VaultIndexService {
     void this.fullScan();
   }
 
+  /** 周期 / 自动推断设置变化后调用：丢弃任务缓存标记，强制重解析全文任务。 */
+  invalidateTaskCache(): void {
+    this.taskDay = "";
+    void this.fullScan();
+  }
+
   writeNow(): void {
     void this.writeSnapshot();
   }
@@ -169,10 +183,11 @@ export class VaultIndexService {
   }
 
   private isNoteFile(file: TAbstractFile): file is TFile {
+    const configDir = this.app.vault.configDir || ".obsidian";
     return (
       file instanceof TFile &&
       file.extension === "md" &&
-      !file.path.startsWith(".obsidian/") &&
+      !file.path.startsWith(`${configDir}/`) &&
       !file.path.startsWith(".trash/")
     );
   }
@@ -193,35 +208,56 @@ export class VaultIndexService {
     };
     const explicit = pickFrontmatterSummary(cacheLike?.frontmatter ?? null);
     const baseline = this.baseline?.notes[file.path] ?? null;
-    let summary: string;
-
-    if (explicit) {
-      summary = explicit;
-    } else {
-      const cached: SummaryCacheEntry | null = baseline
-        ? {
-            mtime: baseline.mtime,
-            algo: this.baseline?.algo ?? SUMMARY_ALGO,
-            summary: baseline.summary,
-          }
-        : null;
-      if (cached && !shouldRecompute(cached, meta.mtime)) {
-        summary = cached.summary;
-      } else {
-        let body = "";
-        try {
-          body = await this.app.vault.cachedRead(file);
-        } catch {
-          body = "";
+    const cached: SummaryCacheEntry | null = baseline
+      ? {
+          mtime: baseline.mtime,
+          algo: this.baseline?.algo ?? SUMMARY_ALGO,
+          summary: baseline.summary,
         }
-        summary = summarize({ cache: cacheLike, body, basename: meta.basename });
-      }
-    }
+      : null;
+    const canReuseSummary =
+      !explicit && cached && !shouldRecompute(cached, meta.mtime);
+
+    // v1.0.6：任务下次到期依赖「今天」。快照 taskDay 与今天一致且 mtime 未变时
+    // 复用已存任务、不读正文；跨天或 mtime 变化才读正文重解析（循环任务逐日推进）。
+    const today = todayString();
+    const canReuseTasks = Boolean(
+      baseline &&
+        this.baseline?.taskDay === today &&
+        baseline.mtime === meta.mtime &&
+        Array.isArray(baseline.tasks),
+    );
+    // 有 frontmatter 摘要时摘要不需要正文；任务可复用时也不需要正文。仅当二者之一需要才读。
+    const needBody = (!explicit && !canReuseSummary) || !canReuseTasks;
+    const body = needBody ? await this.readBody(file) : "";
+
+    const summary = explicit
+      ? explicit
+      : canReuseSummary && cached
+        ? cached.summary
+        : summarize({ cache: cacheLike, body, basename: meta.basename });
+
+    const tasks = canReuseTasks && baseline
+      ? baseline.tasks
+      : parseTasks({
+          body,
+          frontmatter: cacheLike?.frontmatter ?? null,
+          today,
+          autoInfer: this.taskAutoInfer(),
+        });
 
     return {
-      record: buildNoteRecord(meta, cacheLike, summary),
+      record: buildNoteRecord(meta, cacheLike, summary, tasks),
       needsMeta: cache === null,
     };
+  }
+
+  private async readBody(file: TFile): Promise<string> {
+    try {
+      return await this.app.vault.cachedRead(file);
+    } catch {
+      return "";
+    }
   }
 
   private queueUpsert(file: TAbstractFile): void {
@@ -285,6 +321,7 @@ export class VaultIndexService {
     const signal: ScanSignal = { aborted: false };
     this.scanSignal = signal;
     this.lastProgressEmit = 0;
+    this.taskDay = todayString();
     this.status = {
       ...emptyStatus(this.indexPath),
       phase: "scanning",
@@ -446,7 +483,7 @@ export class VaultIndexService {
       if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
       await adapter.write(
         this.indexPath,
-        serializeSnapshot(buildSnapshot(notes, SUMMARY_ALGO)),
+        serializeSnapshot(buildSnapshot(notes, SUMMARY_ALGO, Date.now(), this.taskDay)),
       );
       this.status.lastWriteAt = Date.now();
       this.emit();

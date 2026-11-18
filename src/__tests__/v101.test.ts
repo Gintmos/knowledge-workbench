@@ -39,6 +39,7 @@ function note(path: string, tags: string[] = []): NoteRecord {
     reviewStage: 0,
     interval: null,
     ease: null,
+    tasks: [],
   };
 }
 

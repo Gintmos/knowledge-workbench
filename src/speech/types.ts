@@ -54,6 +54,8 @@ export interface SpeechEngine {
   /** 是否需要 10s pause/resume 保活；云端 <audio> 引擎不需要。 */
   needsKeepAlive?: boolean;
   supported(): boolean;
+  /** 可选：设置变化后主动准备模型，长耗时在后台进行。 */
+  prepare?(): void;
   getVoices(): SpeechVoice[];
   /** 宿主是否确实提供了可用音色（Android WebView 常为 false）。 */
   hasVoices?(): boolean;

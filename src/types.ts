@@ -56,6 +56,14 @@ export interface WorkbenchSettings {
   speechVoiceName: string;
   /** 块间停顿上限（毫秒）；0 表示关闭，生产默认 420。 */
   speechPauseMs: number;
+  /** 1.0.7：朗读引擎。system=系统语音；piper=库内 Piper WASM 本地模型。 */
+  speechEngine: "system" | "piper";
+  /** 1.0.7：Piper 模型与运行时文件所在库内目录。 */
+  piperModelDir: string;
+  /** 1.0.7：Piper 音色 ID；当前仅提供 zh_CN-huayan-medium。 */
+  piperVoiceId: string;
+  /** v1.0.6：是否根据任务描述中的中文周期词推断下次到期（默认开）。 */
+  taskAutoInfer: boolean;
   /** v1.0.2 起云端神经 TTS 已搁置：仅保留字段兼容旧 data.json，运行时不接线。 */
   cloudTtsEnabled: boolean;
   cloudTtsUrl: string;
@@ -96,6 +104,22 @@ export interface NoteRecord {
   reviewStage: number;
   interval: number | null;
   ease: number | null;
+  /** v1.0.6：从正文解析出的未完成任务；可由 vault 重建，不承担用户状态。 */
+  tasks: TaskItem[];
+}
+
+/** 单条正文任务（催办 / 待办的数据源）。 */
+export interface TaskItem {
+  /** 任务正文（去掉 - [ ] 与周期标记后的可读文本）。 */
+  text: string;
+  /** 推算出的下次到期日 yyyy-mm-dd；无日期任务为 null（只显示待办、不进日历）。 */
+  due: string | null;
+  /** 循环周期天数；null 表示一次性任务。 */
+  periodDays: number | null;
+  /** 判定依据来源，便于界面核对。 */
+  source: "due" | "every" | "frontmatter" | "period-word" | "none";
+  /** 任务所在行号（从 0 起），用于就地勾选与 .ics 稳定 uid。 */
+  line: number;
 }
 
 /** 写入 vault 内 index.json 的快照，可随用户既有同步方案跨端。 */
@@ -103,6 +127,8 @@ export interface IndexSnapshot {
   version: number;
   algo: number;
   generatedAt: number;
+  /** v1.0.6：tasks 是基于哪一天解析的；跨天或 mtime 变化才重解析正文任务。 */
+  taskDay?: string;
   notes: Record<string, NoteRecord>;
 }
 
@@ -130,17 +156,29 @@ export interface IndexStatus {
   lastWriteAt: number | null;
 }
 
-export type TodayKind = "overdue" | "due" | "stale" | "review";
+export type TodayKind =
+  | "overdue"
+  | "due"
+  | "review"
+  | "followup"
+  | "todo";
 
 export interface TodayItem {
   path: string;
   title: string;
   kind: TodayKind;
-  /** 原始日期（due / review / updated），统一 yyyy-mm-dd。 */
+  /** 原始日期（due / review / 任务下次到期），统一 yyyy-mm-dd。 */
   date: string | null;
-  /** 逾期天数或过时天数。 */
+  /** 逾期天数。 */
   days: number;
   detail: string;
+  /** v1.0.6：任务级条目附带的信息；笔记级条目为 undefined。 */
+  task?: {
+    text: string;
+    line: number;
+    periodDays: number | null;
+    source: TaskItem["source"];
+  };
 }
 
 export interface TodaySummary {
@@ -148,7 +186,8 @@ export interface TodaySummary {
   items: TodayItem[];
   overdue: TodayItem[];
   due: TodayItem[];
-  stale: TodayItem[];
+  followup: TodayItem[];
+  todo: TodayItem[];
   review: TodayItem[];
   total: number;
 }
@@ -199,7 +238,8 @@ export interface DomainSnapshot {
 }
 
 export const DEFAULT_SETTINGS: WorkbenchSettings = {
-  staleDays: 90,
+  /** v1.0.6：原过时阈值 90 改为催办默认周期 30 天。 */
+  staleDays: 30,
   reviewIntervals: [1, 3, 7, 15, 30],
   icsPath: "知识管理工作台/提醒.ics",
   indexPath: INDEX_PATH_DEFAULT,
@@ -209,6 +249,10 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
   speechProsody: true,
   speechVoiceName: "",
   speechPauseMs: 420,
+  speechEngine: "system",
+  piperModelDir: "知识管理工作台/tts",
+  piperVoiceId: "zh_CN-huayan-medium",
+  taskAutoInfer: true,
   cloudTtsEnabled: false,
   cloudTtsUrl: "",
   cloudTtsKey: "",

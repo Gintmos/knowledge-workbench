@@ -3,6 +3,7 @@ import {
   SUMMARY_ALGO,
   type IndexSnapshot,
   type NoteRecord,
+  type TaskItem,
 } from "../types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,6 +25,33 @@ function nullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+const TASK_SOURCES = new Set<TaskItem["source"]>([
+  "due",
+  "every",
+  "frontmatter",
+  "period-word",
+  "none",
+]);
+
+function toTasks(value: unknown): TaskItem[] {
+  if (!Array.isArray(value)) return [];
+  const result: TaskItem[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw["text"] !== "string") continue;
+    const source = TASK_SOURCES.has(raw["source"] as TaskItem["source"])
+      ? (raw["source"] as TaskItem["source"])
+      : "none";
+    result.push({
+      text: raw["text"],
+      due: nullableString(raw["due"]),
+      periodDays: nullableNumber(raw["periodDays"]),
+      source,
+      line: Math.max(0, Math.floor(nullableNumber(raw["line"]) ?? 0)),
+    });
+  }
+  return result;
+}
+
 function toNoteRecord(path: string, raw: unknown): NoteRecord | null {
   if (!isRecord(raw)) return null;
   if (typeof raw["mtime"] !== "number" || typeof raw["size"] !== "number") return null;
@@ -43,6 +71,8 @@ function toNoteRecord(path: string, raw: unknown): NoteRecord | null {
     reviewStage: Math.max(0, Math.floor(nullableNumber(raw["reviewStage"]) ?? 0)),
     interval: nullableNumber(raw["interval"]),
     ease: nullableNumber(raw["ease"]),
+    // v1.0.6：旧快照无 tasks 字段时补空数组，不因此判为损坏；下次扫描会重解析。
+    tasks: toTasks(raw["tasks"]),
   };
 }
 
@@ -64,6 +94,10 @@ export function normalizeSnapshot(raw: unknown): IndexSnapshot | null {
     algo: typeof raw["algo"] === "number" ? raw["algo"] : SUMMARY_ALGO,
     generatedAt:
       typeof raw["generatedAt"] === "number" ? raw["generatedAt"] : Date.now(),
+    taskDay:
+      typeof raw["taskDay"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw["taskDay"])
+        ? raw["taskDay"]
+        : undefined,
     notes,
   };
 }
@@ -76,11 +110,13 @@ export function buildSnapshot(
   notes: Record<string, NoteRecord>,
   algo = SUMMARY_ALGO,
   generatedAt = Date.now(),
+  taskDay?: string,
 ): IndexSnapshot {
   return {
     version: INDEX_VERSION,
     algo,
     generatedAt,
+    taskDay,
     notes,
   };
 }

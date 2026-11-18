@@ -1,4 +1,4 @@
-import { SUMMARY_LIMIT, type NoteRecord } from "../types";
+import { SUMMARY_LIMIT, type NoteRecord, type TaskItem } from "../types";
 
 /**
  * 纯函数层：不 import obsidian，输入用最小结构描述，
@@ -127,6 +127,7 @@ export function buildNoteRecord(
   file: FileMetaLike,
   cache: FileCacheLike | null,
   summaryOverride?: string,
+  tasks: TaskItem[] = [],
 ): NoteRecord {
   const fm = cache?.frontmatter ?? null;
   const title = pickTitle(fm, cache, file.basename);
@@ -150,5 +151,6 @@ export function buildNoteRecord(
     reviewStage: Math.max(0, Math.floor(numberField(fm, "review-stage") ?? 0)),
     interval: numberField(fm, "interval"),
     ease: numberField(fm, "ease"),
+    tasks,
   };
 }

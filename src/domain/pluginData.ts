@@ -27,7 +27,12 @@ function nonEmptyString(value: unknown, fallback: string): string {
 
 export function normalizeSettings(raw: unknown): WorkbenchSettings {
   const source = isRecord(raw) ? raw : {};
-  const staleDays = Math.max(1, Math.floor(finiteNumber(source["staleDays"], DEFAULT_SETTINGS.staleDays)));
+  // v1.0.6：原「过时阈值」改为「催办默认周期」。旧值恰为 90 视为未改过，迁移到 30。
+  const rawStale = finiteNumber(source["staleDays"], DEFAULT_SETTINGS.staleDays);
+  const staleDays = Math.max(
+    1,
+    Math.floor(rawStale === 90 ? DEFAULT_SETTINGS.staleDays : rawStale),
+  );
   const intervals = Array.isArray(source["reviewIntervals"])
     ? source["reviewIntervals"].filter(
         (item): item is number => typeof item === "number" && item > 0,
@@ -60,6 +65,14 @@ export function normalizeSettings(raw: unknown): WorkbenchSettings {
       1200,
       Math.max(0, Math.floor(finiteNumber(source["speechPauseMs"], DEFAULT_SETTINGS.speechPauseMs))),
     ),
+    speechEngine:
+      source["speechEngine"] === "piper" ? "piper" : DEFAULT_SETTINGS.speechEngine,
+    piperModelDir: nonEmptyString(source["piperModelDir"], DEFAULT_SETTINGS.piperModelDir),
+    piperVoiceId: nonEmptyString(source["piperVoiceId"], DEFAULT_SETTINGS.piperVoiceId),
+    taskAutoInfer:
+      typeof source["taskAutoInfer"] === "boolean"
+        ? source["taskAutoInfer"]
+        : DEFAULT_SETTINGS.taskAutoInfer,
     // v1.0.2：云端神经朗读已搁置，旧 data.json 里残留的开启状态一律强制关闭。
     cloudTtsEnabled: false,
     cloudTtsUrl:

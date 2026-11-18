@@ -16,7 +16,7 @@ function parentDir(path: string): string {
 }
 
 /**
- * 把今日待办 / 复习 / 过时项写成 vault 内的 .ics（含 VALARM 提前 1 天）。
+ * 把今日待办 / 复习 / 催办项写成 vault 内的 .ics（含 VALARM 提前 1 天）。
  * 提醒最终由系统日历触发，插件不常驻后台；手机端只写库内，由界面提示导入方式。
  */
 export class IcsService {

@@ -1,6 +1,6 @@
 {
   "name": "knowledge-workbench",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "private": true,
   "description": "Obsidian plugin: vault-local knowledge classification, tasks, review plan and note reading. No backend, no network requests.",
   "scripts": {
@@ -13,16 +13,19 @@
     "release:check": "node scripts/release-check.mjs",
     "benchmark": "node scripts/benchmark.mjs",
     "ics:samples": "node scripts/ics-samples.mjs",
+    "piper:setup": "node scripts/piper-setup.mjs",
     "package": "npm run build && node scripts/package.mjs"
   },
   "devDependencies": {
+    "@diffusionstudio/piper-wasm": "^1.0.0",
+    "@mintplex-labs/piper-tts-web": "^1.0.5",
     "@types/node": "^22.9.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "builtin-modules": "^4.0.0",
     "esbuild": "^0.24.0",
     "eslint": "^8.57.1",
     "obsidian": "latest",
+    "onnxruntime-web": "^1.30.0",
     "typescript": "^5.6.3"
   }
 }

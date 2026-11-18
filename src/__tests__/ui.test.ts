@@ -45,6 +45,7 @@ function note(path: string, patch: Partial<NoteRecord> = {}): NoteRecord {
     ease: null,
     ...patch,
     reviewStage: patch.reviewStage ?? 0,
+    tasks: patch.tasks ?? [],
   };
 }
 
@@ -94,9 +95,10 @@ test("今日卡片标题折叠前后一致，且不带「项待处理」计数�
   assert.equal(title.includes("（"), false);
 });
 
-test("今日清单按 逾期 → 今日到期 → 复习 → 过时 分组，空组不出现", () => {
+test("今日清单按 逾期 → 今日到期 → 催办 → 复习 → 待办 分组，空组不出现", () => {
   const items = [
-    item("stale.md", "stale"),
+    item("todo.md", "todo"),
+    item("followup.md", "followup"),
     item("review.md", "review"),
     item("due.md", "due"),
     item("overdue.md", "overdue"),
@@ -105,7 +107,7 @@ test("今日清单按 逾期 → 今日到期 → 复习 → 过时 分组，空
   const groups = groupToday(items);
   assert.deepEqual(
     groups.map(([kind]) => kind),
-    ["overdue", "due", "review", "stale"],
+    ["overdue", "due", "followup", "review", "todo"],
   );
   assert.equal(groups[0][1].length, 2);
   assert.equal(groups.every(([, list]) => list.length > 0), true);

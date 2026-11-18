@@ -5,7 +5,8 @@ const KIND_PREFIX: Record<TodayKind, string> = {
   overdue: "逾期待办",
   due: "今日待办",
   review: "复习",
-  stale: "知识更新",
+  followup: "催办",
+  todo: "待办",
 };
 
 /** FNV-1a 32 位哈希，按 UTF-16 双字节混合以避免中文路径碰撞；无 crypto / Node 依赖。 */
@@ -23,8 +24,11 @@ export function eventUid(item: {
   path: string;
   kind: TodayKind;
   date: string;
+  /** 任务级条目的行号，纳入哈希避免同篇多条任务互相覆盖。 */
+  line?: number;
 }): string {
-  return `kw-${hashKey(`${item.path}|${item.kind}|${item.date}`)}@local`;
+  const line = item.line === undefined ? "" : `#${item.line}`;
+  return `kw-${hashKey(`${item.path}${line}|${item.kind}|${item.date}`)}@local`;
 }
 
 export function escapeIcsText(text: string): string {
@@ -99,16 +103,20 @@ export function nextIcsDate(date: string): string {
 export function buildIcsEvents(items: TodayItem[], today: string): IcsEvent[] {
   const events = new Map<string, IcsEvent>();
   for (const item of items) {
-    const source = item.date && item.date >= today ? item.date : today;
+    // 无日期的待办不进日历：系统日历无法为无到期日的任务定位。
+    if (!item.date) continue;
+    const source = item.date >= today ? item.date : today;
     const date = toIcsDate(source);
     if (!date) continue;
-    const { path, kind } = item;
-    const uid = eventUid({ path, kind, date });
+    const { path, kind, task } = item;
+    const uid = eventUid({ path, kind, date, line: task?.line });
     if (events.has(uid)) continue;
-    const summary = `${KIND_PREFIX[kind]} · ${item.title || path}`;
+    const label = task?.text || item.title || path;
+    const summary = `${KIND_PREFIX[kind]} · ${label}`;
     const original =
-      item.date && item.date !== source ? ` · 原定 ${item.date}` : "";
-    const description = `vault 内路径：${path}${original}${
+      item.date !== source ? ` · 原定 ${item.date}` : "";
+    const owner = task ? ` · 所属笔记：${item.title}` : "";
+    const description = `vault 内路径：${path}${original}${owner}${
       item.detail ? ` · ${item.detail}` : ""
     }`;
     events.set(uid, { uid, date, summary, description, path, kind });

@@ -247,7 +247,7 @@ export class WorkbenchView extends ItemView {
     if (!domain.today.items.length) {
       card.createDiv({
         cls: "kw-hint",
-        text: "今日没有待处理、复习或过时提醒。",
+        text: "今日没有待处理、复习、催办或待办任务。",
       });
     }
     const groups = groupToday(domain.today.items);
@@ -289,6 +289,27 @@ export class WorkbenchView extends ItemView {
       event.preventDefault();
       this.openNote(item.path);
     });
+
+    // 单篇就地操作：逾期/到期 → 完成；复习 → 推进；催办/待办 → 勾选任务行。
+    const done = row.createEl("button", {
+      cls: "kw-resolve-btn",
+      text: item.kind === "review" ? "完成复习" : "完成",
+    });
+    done.setAttr("type", "button");
+    done.setAttr(
+      "aria-label",
+      item.kind === "followup" || item.kind === "todo"
+        ? `勾选任务「${item.title}」`
+        : `标记「${item.title}」为已完成`,
+    );
+    done.addEventListener("click", () => {
+      void this.plugin.resolveTodayItem(
+        item.path,
+        item.kind,
+        item.task?.line,
+      );
+    });
+
     row.createDiv({
       cls: "kw-note-meta",
       text: `${item.detail} · ${item.path}`,
@@ -377,9 +398,26 @@ export class WorkbenchView extends ItemView {
     const grid = card.createDiv({ cls: "kw-grid" });
     this.stat(grid, "阶段", PHASE_TEXT[status.phase] ?? status.phase);
     this.stat(grid, "已索引", `${status.indexed} 篇`);
-    this.stat(grid, "本次耗时", `${status.durationMs} ms`);
-    this.stat(grid, "主线程让出", `${status.yields} 次`);
-    this.stat(grid, "待补元数据", `${status.cacheMisses} 篇`);
+    // v1.0.6：调试指标收进默认折叠的「运行信息」，常显只留阶段与篇数。
+    const runtime = card.createDiv({ cls: "kw-runtime-info" });
+    const runtimeToggle = runtime.createEl("button", {
+      cls: "kw-fold-btn kw-runtime-toggle",
+      text: "运行信息 ⌄",
+    });
+    runtimeToggle.setAttr("type", "button");
+    runtimeToggle.setAttr("aria-expanded", "false");
+    const runtimeBody = runtime.createDiv({ cls: "kw-runtime-body" });
+    runtimeBody.setAttr("hidden", "true");
+    this.stat(runtimeBody, "本次耗时", `${status.durationMs} ms`);
+    this.stat(runtimeBody, "主线程让出", `${status.yields} 次`);
+    this.stat(runtimeBody, "待补元数据", `${status.cacheMisses} 篇`);
+    runtimeToggle.addEventListener("click", () => {
+      const open = runtimeBody.hasAttribute("hidden");
+      if (open) runtimeBody.removeAttribute("hidden");
+      else runtimeBody.setAttr("hidden", "true");
+      runtimeToggle.setAttr("aria-expanded", String(open));
+      runtimeToggle.setText(open ? "运行信息 ⌃" : "运行信息 ⌄");
+    });
     card.createDiv({ cls: "kw-hint", text: `index.json：${status.indexPath}` });
     if (status.error) {
       card.createDiv({ cls: "kw-error", text: `索引异常：${status.error}` });
@@ -440,7 +478,11 @@ export class WorkbenchView extends ItemView {
     const countsCard = parent.createDiv({ cls: "kw-card" });
     countsCard.createDiv({
       cls: "kw-card-title",
-      text: `全量分类（${domain.categories.length} 类，逐篇统计不设上限）`,
+      text: `主分类总览（${domain.categories.length} 类，每篇只归一类）`,
+    });
+    countsCard.createDiv({
+      cls: "kw-hint",
+      text: "用于看互斥的大盘分布；同一篇笔记在下方「标签 / 文件夹」卡里可计入多个标签。",
     });
     const activeCategory =
       selection?.scope === "category" ? selection.key : null;
@@ -472,10 +514,21 @@ export class WorkbenchView extends ItemView {
 
     // 已有卡片：标签 / 文件夹。条形 key 与列表行显示名完全一致。
     const tagCard = parent.createDiv({ cls: "kw-card" });
-    tagCard.createDiv({
-      cls: "kw-card-title",
+    const tagHead = tagCard.createDiv({
+      cls: "kw-card-title kw-card-title-row",
+    });
+    tagHead.createSpan({
       text: `标签 / 文件夹（标签 ${domain.tagCounts.length} 个，文件夹 ${domain.folderCounts.length} 个）`,
     });
+    const manageBtn = tagHead.createEl("button", {
+      cls: "kw-manage-tags",
+      text: "管理标签",
+    });
+    manageBtn.setAttr("type", "button");
+    manageBtn.setAttr("aria-label", "批量重命名或合并标签");
+    manageBtn.addEventListener("click", () =>
+      this.plugin.openTagManager(),
+    );
     const activeDetail = selection?.scope === "detail" ? selection.key : null;
     const tagMax = barRowsMax([...domain.tagCounts, ...domain.folderCounts]);
     const pickedDetail = activeDetail
@@ -513,15 +566,7 @@ export class WorkbenchView extends ItemView {
       }
     }
 
-    const actions = parent.createDiv({ cls: "kw-actions" });
-    const rebuild = actions.createEl("button", { text: "重建索引" });
-    rebuild.addEventListener("click", () => this.plugin.index.rescan());
-    const write = actions.createEl("button", { text: "写入快照" });
-    write.addEventListener("click", () => this.plugin.index.writeNow());
-    const ics = actions.createEl("button", { text: "重建 .ics" });
-    ics.addEventListener("click", () => this.plugin.workbench.rebuildIcs());
-    const copy = actions.createEl("button", { text: "复制 .ics" });
-    copy.addEventListener("click", () => void this.plugin.copyIcs());
+    // v1.0.6：四个维护按钮已移到设置页（那里有逐项说明），统计页不再重复摆放。
   }
 
   private renderCountRows(

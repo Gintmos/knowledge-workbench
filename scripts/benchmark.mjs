@@ -149,7 +149,7 @@ try {
     return m.classifier.chartSlices(notes, "tag");
   }, 1000);
 
-  const todayItems = measure("待办 / 逾期 / 过时 / 复习采集", () => m.tasks.buildToday(notes, TODAY, settings), 2000);
+  const todayItems = measure("待办 / 逾期 / 催办 / 复习采集", () => m.tasks.buildToday(notes, TODAY, settings), 2000);
   measure("ICS 事件生成 + VCALENDAR 渲染", () => {
     const events = m.ics.buildIcsEvents(todayItems.items, TODAY);
     return m.ics.renderIcs(events, new Date("2026-11-15T08:00:00Z"));

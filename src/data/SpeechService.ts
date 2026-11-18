@@ -39,6 +39,8 @@ const NO_VOICES_TEXT =
 export interface SpeechServiceOptions {
   /** 本地 / 系统语音引擎（可注入内存实现以便单测）。 */
   engine: SpeechEngine | null;
+  /** 1.0.7：首选引擎（Piper 本地语音）；失败时回退 engine。 */
+  preferredEngine?: SpeechEngine | null;
   /** 兼容入口：v1.0.2 起生产路径不注入云端引擎（功能已搁置）。 */
   cloudEngine?: SpeechEngine | null;
   mobile: boolean;
@@ -56,6 +58,7 @@ export interface SpeechServiceOptions {
 
 export class SpeechService {
   private readonly local: SpeechEngine | null;
+  private readonly preferred: SpeechEngine | null;
   private readonly cloud: SpeechEngine | null;
   private readonly mobile: boolean;
   private readonly progress: SpeechProgressStore;
@@ -76,6 +79,7 @@ export class SpeechService {
   private message = "";
   private started = false;
   private cloudFailed = false;
+  private preferredFailed = false;
   private pendingGap = false;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -84,6 +88,7 @@ export class SpeechService {
 
   constructor(options: SpeechServiceOptions) {
     this.local = options.engine;
+    this.preferred = options.preferredEngine ?? null;
     this.cloud = options.cloudEngine ?? null;
     this.mobile = options.mobile;
     this.progress = options.progress;
@@ -102,11 +107,18 @@ export class SpeechService {
   }
 
   get supported(): boolean {
-    return this.cloud?.supported() === true || this.local?.supported() === true;
+    return (
+      this.preferred?.supported() === true ||
+      this.cloud?.supported() === true ||
+      this.local?.supported() === true
+    );
   }
 
-  /** 云端优先（搁置路径，生产为 null）；云端失败或离线时退回本地系统语音。 */
+  /** 首选引擎优先；失败或未就绪时回退系统语音。云端为历史兼容入口。 */
   private activeEngine(): SpeechEngine | null {
+    if (this.preferred && !this.preferredFailed && this.preferred.supported()) {
+      return this.preferred;
+    }
     if (this.cloud && !this.cloudFailed && this.cloud.supported()) {
       return this.cloud;
     }
@@ -129,6 +141,13 @@ export class SpeechService {
   refreshCloud(): void {
     if (this.disposed) return;
     this.cloudFailed = false;
+    this.emit();
+  }
+
+  /** 首选引擎配置 / 模型变化后清除失败标记，允许再次使用。 */
+  refreshPreferred(): void {
+    if (this.disposed) return;
+    this.preferredFailed = false;
     this.emit();
   }
 
@@ -368,6 +387,7 @@ export class SpeechService {
   }
 
   private cancelEngines(): void {
+    this.preferred?.cancel();
     this.cloud?.cancel();
     this.local?.cancel();
   }
@@ -428,7 +448,20 @@ export class SpeechService {
           ) {
             return;
           }
-          // 云端失败（离线 / 密钥失效 / 额度）→ 自动回退方案 A。
+          // 首选本地神经引擎失败 → 自动回退系统语音。
+          if (
+            engine === this.preferred &&
+            this.local?.supported() === true &&
+            !this.preferredFailed
+          ) {
+            this.preferredFailed = true;
+            this.preferred?.cancel();
+            this.message = "本地神经朗读不可用，已自动回退到系统语音（规则式韵律）。";
+            this.emit();
+            this.speakCurrent();
+            return;
+          }
+          // 历史云端适配层失败（离线 / 密钥失效 / 额度）→ 自动回退方案 A。
           if (
             engine === this.cloud &&
             this.local?.supported() === true &&
@@ -436,7 +469,7 @@ export class SpeechService {
           ) {
             this.cloudFailed = true;
             this.cloud?.cancel();
-            this.message = "云端朗读不可用，已自动回退到系统语音（规则式韵律）。";
+            this.message = "本地神经朗读不可用，已自动回退到系统语音（规则式韵律）。";
             this.emit();
             this.speakCurrent();
             return;

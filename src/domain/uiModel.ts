@@ -21,8 +21,9 @@ export const TAB_LABELS: Record<WorkbenchTab, string> = {
 export const KIND_LABEL: Record<TodayKind, string> = {
   overdue: "逾期",
   due: "今日到期",
+  followup: "催办",
   review: "复习到期",
-  stale: "过时提醒",
+  todo: "待办",
 };
 
 export function isTab(value: unknown): value is WorkbenchTab {
@@ -39,7 +40,7 @@ export function todayCardTitle(day: string): string {
 
 /** 按类型分组，用于展开后的分组清单；items 已由 TaskService 排好序。 */
 export function groupToday(items: TodayItem[]): Array<[TodayKind, TodayItem[]]> {
-  const order: TodayKind[] = ["overdue", "due", "review", "stale"];
+  const order: TodayKind[] = ["overdue", "due", "followup", "review", "todo"];
   const groups = new Map<TodayKind, TodayItem[]>();
   for (const item of items) {
     const list = groups.get(item.kind) ?? [];

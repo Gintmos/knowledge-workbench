@@ -51,7 +51,8 @@ test("摘要缓存：frontmatter 摘要不读正文；命中 index.json 后重�
   const first = await startIndex(app);
   assert.equal(first.index.getNote("fm.md")?.summary, "用户手写摘要");
   assert.match(first.index.getNote("body.md")?.summary ?? "", /正文首个有效段落/);
-  assert.equal(app.vault.readCount, 1, "只有缺少 frontmatter 摘要的笔记需要读正文");
+  // v1.0.6：首次全量扫描每篇都要读正文解析任务（含 frontmatter 摘要的 fm.md）。
+  assert.equal(app.vault.readCount, 2, "首次扫描两篇都要读正文解析任务");
 
   first.index.writeNow();
   await waitFor(
@@ -122,7 +123,7 @@ test("WorkbenchService：93 条基线聚合、Top 10 与 .ics 写入 vault", asy
       tags: [{ tag: `#分类${index % 12}` }],
     });
   }
-  // 3 类今日项：逾期、复习到期、过时提醒
+  // 3 类今日项：逾期、复习到期、任务催办
   app.metadataCache.caches.set("notes/n0.md", {
     tags: [{ tag: "#分类0" }],
     frontmatter: { due: "2026-11-10", status: "todo" },
@@ -135,6 +136,7 @@ test("WorkbenchService：93 条基线聚合、Top 10 与 .ics 写入 vault", asy
     tags: [{ tag: "#分类2" }],
     frontmatter: { updated: "2026-01-01" },
   });
+  app.vault.bodies.set("notes/n2.md", "- [ ] 跟进季度目标 @due(2026-11-01)\n");
 
   const index = new VaultIndexService(app as unknown as App, { indexPath: INDEX_PATH });
   const workbench = new WorkbenchService(app as unknown as App, store, index, {
@@ -163,7 +165,8 @@ test("WorkbenchService：93 条基线聚合、Top 10 与 .ics 写入 vault", asy
   assert.ok(snapshot.today.total >= 3);
   assert.ok(snapshot.today.overdue.length >= 1);
   assert.ok(snapshot.today.review.length >= 1);
-  assert.ok(snapshot.today.stale.length >= 1);
+  assert.ok(snapshot.today.followup.length >= 1, "正文 @due 过期任务进入催办");
+  assert.ok(Array.isArray(snapshot.today.todo));
 
   workbench.rebuildIcs();
   await waitFor(
