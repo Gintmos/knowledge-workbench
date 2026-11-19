@@ -3,7 +3,7 @@
  * 纯静态核对：每条基线给出源码证据，输出 PASS / FAIL 与证据片段。
  * 运行：node scripts/audit-feature-baseline.mjs
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -186,4 +186,10 @@ for (const g of groups) {
 }
 lines.unshift(`功能验收基线核对：${pass} PASS / ${fail} FAIL / 共 ${results.length} 条`);
 console.log(lines.join("\n"));
+if (process.argv.includes("--json")) {
+  writeFileSync(join(ROOT, "dist", "baseline-audit.json"), JSON.stringify({
+    total: results.length, pass, fail, results,
+  }, null, 2), "utf8");
+  console.log(`\nJSON 报告：dist/baseline-audit.json`);
+}
 process.exitCode = fail === 0 ? 0 : 1;
