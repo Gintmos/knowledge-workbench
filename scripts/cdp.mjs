@@ -13,8 +13,8 @@ import { writeFileSync } from "node:fs";
 import { request } from "node:http";
 
 const PORT = process.env.CDP_PORT || "9222";
-const cmd = process.argv[2];
-const arg = process.argv[3] ?? "";
+const cmd = process.argv[2] === "--title" ? process.argv[4] : process.argv[2];
+const arg = (process.argv[2] === "--title" ? process.argv[5] : process.argv[3]) ?? "";
 
 function httpJson(path) {
   return new Promise((resolve, reject) => {
@@ -35,8 +35,11 @@ function httpJson(path) {
 }
 
 const targets = await httpJson("/json/list");
-const titleFilter = process.argv.find((a, i) => a === "--title" && process.argv[i + 1]);
-const pages = targets.filter((t) => t.type === "page" && (t.url || "").includes("obsidian.md"));
+const titleIndex = process.argv.findIndex((a) => a === "--title");
+const titleFilter = titleIndex >= 0 ? process.argv[titleIndex + 1] : undefined;
+const pages = targets.filter(
+  (t) => t.type === "page" && ((t.url || "").includes("obsidian.md") || (t.url || "") === "about:blank"),
+);
 const page = titleFilter
   ? pages.find((t) => (t.title || "").includes(titleFilter))
   : pages[0];
