@@ -42,7 +42,8 @@ interface OrtModule {
   env: {
     wasm: {
       numThreads: number;
-      wasmPaths: Record<string, string>;
+      /** ONNX Runtime 1.30 形态：{ mjs: 加载器地址, wasm: 二进制地址 }。 */
+      wasmPaths: { mjs?: string; wasm?: string };
     };
   };
   Tensor: new (type: string, data: ArrayLike<number>, dims: number[]) => unknown;
@@ -63,10 +64,36 @@ export interface PiperEngineOptions {
   onReadyChange?: () => void;
 }
 
-const ONNX_WASM_FILES = [
-  "ort-wasm-simd-threaded.wasm",
-  "ort-wasm-simd-threaded.jsep.wasm",
-];
+/**
+ * ONNX Runtime 1.30 的 WASM 后端由「加载器 .mjs + 二进制 .wasm」两部分组成。
+ * 两者必须成对使用（加载器与二进制是同一次构建的产物，交叉搭配会报
+ * LinkError: function import requires a callable）。
+ * 加载器内部用相对路径找二进制，因此两者都要由本插件注入 blob 地址。
+ */
+const ORT_LOADER_FILE = "ort-wasm-simd-threaded.mjs";
+const ORT_BINARY_FILE = "ort-wasm-simd-threaded.wasm";
+
+/**
+ * piper_phonemize.js 是 Emscripten 的通用产物：按运行环境二选一。
+ * Obsidian 渲染进程同时满足 ENVIRONMENT_IS_WEB 与 ENVIRONMENT_IS_NODE
+ * （Electron 带 Node 集成），于是它走 Node 分支，用 fs.readFileSync 去读
+ * 我们给的 blob 地址——直接报 ENOENT。
+ * 这里在模块作用域内遮蔽 process，让 ENVIRONMENT_IS_NODE 恒为 false，
+ * 强制走浏览器分支，用 fetch 读取 blob 地址。
+ * 注意不能只删 process.versions.node：那会连 Web Worker 的 postMessage 一起失效。
+ */
+const PHONEMIZER_ENV_SHIM = `
+const __kwGlobalProcess = typeof globalThis.process !== "undefined" ? globalThis.process : undefined;
+const process = __kwGlobalProcess
+  ? new Proxy(__kwGlobalProcess, {
+      get(target, key) {
+        if (key === "versions") return {};
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    })
+  : undefined;
+`;
 
 function joinPath(base: string, name: string): string {
   return `${base.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
@@ -107,7 +134,6 @@ export function createPiperEngine(options: PiperEngineOptions): SpeechEngine {
   let config: PiperConfig | null = null;
   let phonemizerFactory: PhonemizerFactory | null = null;
   let ort: OrtModule | null = null;
-  let wasmPaths: Record<string, string> = {};
   let phonemizerUrls: Record<string, string> = {};
   let audio: HTMLAudioElement | null = null;
   let objectUrl: string | null = null;
@@ -157,29 +183,29 @@ export function createPiperEngine(options: PiperEngineOptions): SpeechEngine {
         const phonemizerWasm = await read("piper_phonemize.wasm");
         const phonemizerData = await read("piper_phonemize.data");
         const ortJs = new TextDecoder().decode(await read("ort.wasm.min.mjs"));
+        const ortLoaderJs = new TextDecoder().decode(await read(ORT_LOADER_FILE));
+        const ortBinary = await read(ORT_BINARY_FILE);
         phonemizerUrls = {
           "piper_phonemize.wasm": URL.createObjectURL(new Blob([blobPart(phonemizerWasm)], { type: "application/wasm" })),
           "piper_phonemize.data": URL.createObjectURL(new Blob([blobPart(phonemizerData)])),
         };
-        const phonemizerModule = await import(/* @vite-ignore */ URL.createObjectURL(new Blob([phonemizerJs], { type: "text/javascript" }))) as {
+        // piper_phonemize.js 是 Emscripten 的 CommonJS 风格产物：只写
+        // `module.exports = createPiperPhonemize`（无 ESM export）。以 ESM 载入时
+        // module/exports/define 全不存在，三个分支都不命中，模块导出为空。
+        // 因此在脚本尾部补一句 `export default`，把顶层 var 暴露成默认导出。
+        const phonemizerModule = await import(/* @vite-ignore */ URL.createObjectURL(new Blob([`${PHONEMIZER_ENV_SHIM}\n${phonemizerJs}\nexport default createPiperPhonemize;\n`], { type: "text/javascript" }))) as {
           default?: PhonemizerFactory;
         };
         phonemizerFactory = phonemizerModule.default ?? null;
         if (!phonemizerFactory) throw new Error("piper phonemizer 未导出 createPiperPhonemize");
 
-        wasmPaths = {};
-        for (const name of ONNX_WASM_FILES) {
-          try {
-            const bytes = await read(name);
-            wasmPaths[name] = URL.createObjectURL(new Blob([blobPart(bytes)], { type: "application/wasm" }));
-          } catch {
-            // 只加载库中实际存在的文件；缺哪一个由 ORT 自己报错。
-          }
-        }
         const ortModule = await import(/* @vite-ignore */ URL.createObjectURL(new Blob([ortJs], { type: "text/javascript" }))) as OrtModule;
         ort = ortModule;
         ort.env.wasm.numThreads = 1;
-        ort.env.wasm.wasmPaths = wasmPaths;
+        ort.env.wasm.wasmPaths = {
+          mjs: URL.createObjectURL(new Blob([ortLoaderJs], { type: "text/javascript" })),
+          wasm: URL.createObjectURL(new Blob([blobPart(ortBinary)], { type: "application/wasm" })),
+        };
         session = await ort.InferenceSession.create(modelBytes, {
           executionProviders: ["wasm"],
         });

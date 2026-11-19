@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。版本号与 `manifest.json` / `versions.json` 保持一致，GitHub Release 的 tag 必须等于版本号。
 
+## 1.0.8 — 2026-11-19
+
+修复 1.0.7 的 Piper 本地语音引擎在 Obsidian 内无法完成合成的问题。数据格式不变，无需迁移。
+
+### 修复
+
+- **音素转换器按浏览器环境加载**：`piper_phonemize.js` 是 Emscripten 的通用产物，会按运行环境二选一。Obsidian 渲染进程同时满足 `ENVIRONMENT_IS_WEB` 与 `ENVIRONMENT_IS_NODE`（Electron 带 Node 集成），此前它走 Node 分支用 `fs.readFileSync` 读取插件给的 blob 地址，直接报 `ENOENT`。现在在模块作用域内遮蔽 `process`，强制走浏览器分支用 `fetch` 读取。
+- **音素模块导出形态**：该产物只有 CommonJS 的 `module.exports`，以 ESM 载入时 `module` / `exports` / `define` 均不存在，三个分支都不命中，模块导出为空。现在在脚本尾部补 `export default`，把顶层 `createPiperPhonemize` 暴露为默认导出。
+- **ONNX Runtime 1.30 的加载方式**：1.30 的 WASM 后端由「加载器 `.mjs` + 二进制 `.wasm」两部分组成，且 `wasmPaths` 改为 `{ mjs, wasm }` 对象形态（旧版的按文件映射已不再支持）。此前用旧形态 + 未成对的文件组合，会报 `Failed to resolve module specifier` 与 `LinkError: function import requires a callable`。现在加载器与二进制成对注入 blob 地址。
+- 资源准备脚本 `npm run piper:setup` 相应补齐 `ort-wasm-simd-threaded.mjs`，并移除不再需要的 jsep 变体。
+
+### 实测（Windows / Obsidian 1.15.1 桌面）
+
+- Piper 引擎就绪，音色 `zh_CN-huayan-medium / zh-CN`；音素转换 108ms，合成实时率约 0.44（快于实时）。
+- 合成产物为可播放的 WAV blob，`<audio>` 就绪后 75ms 出声，状态机、分块推进、进度条拖动、暂停/继续、停止存断点均正常。
+
 ## 1.0.7 — 2026-11-19
 
 功能增强版（合并 1.0.6 + 1.0.7 全部改动发布）。数据格式向后兼容：设置新增 `speechEngine` / `piperModelDir` / `piperVoiceId`，旧 `data.json` 自动归一化到系统语音，不改变朗读断点。

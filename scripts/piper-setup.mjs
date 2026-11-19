@@ -43,10 +43,9 @@ const copies = [
   [join(piperBuild, "piper_phonemize.data"), "piper_phonemize.data"],
   [join(ortDist, "ort.wasm.min.mjs"), "ort.wasm.min.mjs"],
 ];
-for (const name of [
-  "ort-wasm-simd-threaded.wasm",
-  "ort-wasm-simd-threaded.jsep.wasm",
-]) {
+// ONNX Runtime 1.30 的 WASM 后端 = 加载器 .mjs + 二进制 .wasm，两者必须成对，
+// 且都由插件以 blob 地址注入（不能走相对路径）。
+for (const name of ["ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
   const source = join(ortDist, name);
   if (existsSync(source)) copies.push([source, name]);
 }
