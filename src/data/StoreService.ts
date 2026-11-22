@@ -23,7 +23,7 @@ export interface StoreOptions {
  * 合成单一 PluginData，经 loadData/saveData 持久化。业务数据不放在这里。
  */
 export class StoreService {
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: number | null = null;
   private saving: Promise<void> | null = null;
   private dirty = false;
   private disposed = false;
@@ -112,7 +112,7 @@ export class StoreService {
   scheduleSave(): void {
     if (this.disposed) return;
     this.clearTimer();
-    this.timer = globalThis.setTimeout(() => {
+    this.timer = window.setTimeout(() => {
       this.timer = null;
       void this.flush();
     }, this.saveDelay);
@@ -149,7 +149,7 @@ export class StoreService {
 
   private clearTimer(): void {
     if (this.timer !== null) {
-      globalThis.clearTimeout(this.timer);
+      window.clearTimeout(this.timer);
       this.timer = null;
     }
   }

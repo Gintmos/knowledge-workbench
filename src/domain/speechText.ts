@@ -64,10 +64,15 @@ export function cleanMarkdownLine(raw: string, options: CleanLineOptions = {}): 
   if (/^\s*<!--/.test(line)) return "";
   if (/^\s*\|/.test(line)) {
     if (!options.keepTableRows) return ""; // 表格数据行：既不朗读也不做摘要段落
+    // 表格单元格两侧的对齐空格会让 TTS 读出「维度 ， 内容」这类断续停顿；
+    // 去掉空格、用逗号连接，既保留逐格文字（摘要与朗读验收都要求不丢字），
+    // 又不会在单元格边界制造多余的停顿。
     line = line
       .replace(/^\s*\|/, "")
       .replace(/\|\s*$/, "")
-      .replace(/\|/g, "，");
+      .split("|")
+      .map((cell) => cell.trim())
+      .join("，");
   }
   line = line
     .replace(OB_COMMENT, "")

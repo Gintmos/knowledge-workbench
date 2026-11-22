@@ -2,16 +2,18 @@ import { Notice, Platform, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { renderCatalog } from "./domain/catalog";
 import { previewTagEdit } from "./domain/tagEdit";
 import { startReview } from "./domain/ReviewService";
+import { replaceInlineTags } from "./domain/inlineTags";
 import { FrontmatterService } from "./data/FrontmatterService";
 import { SpeechService } from "./data/SpeechService";
 import { StoreService } from "./data/StoreService";
 import { VaultIndexService } from "./data/VaultIndexService";
 import { WorkbenchService } from "./data/WorkbenchService";
-import { planReview } from "./domain/ReviewService";
-import { addDays, todayString } from "./domain/TaskService";
+import { planReview, nextReviewDate } from "./domain/ReviewService";
+import { todayString } from "./domain/TaskService";
 import { TAB_LABELS, TAB_ORDER } from "./domain/uiModel";
+import { createCloudTtsEngine } from "./speech/cloud";
 import { createDomSpeechEngine } from "./speech/engine";
-import { createPiperEngine } from "./speech/piperEngine";
+import { createSpeechRouter } from "./speech/router";
 import type { SpeechEngine } from "./speech/types";
 import { NoteModal } from "./ui/NoteModal";
 import { TagManagerModal } from "./ui/TagManagerModal";
@@ -26,7 +28,9 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
   workbench!: WorkbenchService;
   frontmatter!: FrontmatterService;
   speech!: SpeechService;
-  private piperEngine: SpeechEngine | null = null;
+  private edgeEngine: SpeechEngine | null = null;
+  /** 活跃实例：由 speechRouter.current() 在 engine=cloud 时返回（P2-4 后唯一持有者）。 */
+  private cloudEngine: SpeechEngine | null = null;
   private unsubscribeStatus?: () => void;
   private unsubscribeStartup?: () => void;
   private startupNoticeShown = false;
@@ -53,21 +57,51 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     this.workbench = new WorkbenchService(this.app, this.store, this.index, {
       mobile: Platform.isMobile,
     });
-    // v1.0.2：云端神经 TTS 暂时搁置（没有可用的自有服务地址），运行时不接线。
-    // 朗读只走系统语音 + 规则式韵律（方案 A），Android 无语音时用朗读稿替代路径。
-    // 适配层 src/speech/cloud.ts 保留在源码中但未导入，产物 main.js 不含任何联网入口。
+    // 朗读引擎：系统语音为离线兜底；Edge 神经语音（桌面）/ 自定义 TTS 网关（双端）
+    // 是本插件仅有的两个联网选项，且只在用户显式选择对应引擎时才初始化、才联网，
+    // 其余功能始终零网络。原 Piper 本地语音因自然度不足已移除。
     const domEngine = createDomSpeechEngine(() => this.speech?.onVoicesChanged());
-    this.piperEngine = createPiperEngine({
-      hostApp: this.app,
-      getModelDir: () => this.store.settings.piperModelDir,
-      getVoiceId: () => this.store.settings.piperVoiceId,
-      isEnabled: () => this.store.settings.speechEngine === "piper",
-      onReadyChange: () => this.speech?.onVoicesChanged(),
+    // Edge 引擎依赖 Node 的 crypto / ws（需自定义 Host/Origin/UA 头），
+    // 只在桌面端动态加载：手机 WebView 无 Node require，绝不 import 该模块，
+    // 否则会在插件加载阶段就崩溃。Android 请用自定义 TTS 网关或朗读稿。
+    if (!Platform.isMobile) {
+      try {
+        const { createEdgeEngine } = await import("./speech/edgeEngine");
+        this.edgeEngine = createEdgeEngine({
+          isEnabled: () => this.store.settings.speechEngine === "edge",
+          getVoiceId: () => this.store.settings.edgeVoiceId,
+          getRate: () => this.store.settings.speechRate,
+          // P1-1：微软升级接口时用户可在设置页填新版本号热修，无需重打包。
+          getGecVersion: () => this.store.settings.edgeGecVersion,
+        });
+      } catch (error) {
+        console.error("[knowledge-workbench] Edge 语音引擎加载失败", error);
+      }
+    }
+    this.cloudEngine = createCloudTtsEngine(() => {
+      const settings = this.store.settings;
+      return {
+        enabled:
+          settings.speechEngine === "cloud" && settings.cloudTtsEnabled,
+        url: settings.cloudTtsUrl,
+        key: settings.cloudTtsKey,
+        model: settings.cloudTtsModel,
+        voice: settings.cloudTtsVoice,
+        style: settings.cloudTtsStyle,
+      };
+    });
+    const speechRouter = createSpeechRouter({
+      current: () => {
+        const engine = this.store.settings.speechEngine;
+        if (engine === "edge") return this.edgeEngine;
+        if (engine === "cloud") return this.cloudEngine;
+        return null;
+      },
     });
     this.speech = new SpeechService({
       engine: domEngine,
-      // 1.0.7：Piper 作为首选引擎；未启用 / 加载失败自动回退系统语音。
-      preferredEngine: this.piperEngine,
+      // 路由器按设置把朗读委托给 Edge / 自定义网关；失败自动回退系统语音。
+      preferredEngine: speechRouter,
       mobile: Platform.isMobile,
       rate: this.store.settings.speechRate,
       preferChineseVoice: this.store.settings.speechPreferChineseVoice,
@@ -163,6 +197,9 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
           speech: this.speech,
           autoPlay: true,
           onExport: (title, text) => void this.saveSpeechDraft(title, text),
+          onRateChange: (rate) => this.store.updateSettings({ speechRate: rate }),
+          onStartReview: () => void this.startReviewCurrent(file),
+          onStopReview: () => void this.stopReviewCurrent(file),
         }).open();
       },
     });
@@ -186,30 +223,17 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     });
 
     // ── v1.0.6：输入闭环与批量操作 ──────────────────────────
+    // 命令面板会自动加 "Knowledge Workbench: " 前缀，这里只写动作名，避免双重前缀。
+    // 名称统一含「当前笔记」，搜「当前笔记」可一次找到全部输入入口。
     this.addCommand({
       id: "start-review-current",
       name: "为当前笔记开始复习",
       callback: () => void this.startReviewCurrent(),
     });
     this.addCommand({
-      id: "set-due-today",
-      name: "设为今天到期（当前笔记）",
-      callback: () => void this.setCurrentDate("due", 0),
-    });
-    this.addCommand({
-      id: "set-due-tomorrow",
-      name: "设为明天到期（当前笔记）",
-      callback: () => void this.setCurrentDate("due", 1),
-    });
-    this.addCommand({
-      id: "set-review-today",
-      name: "设为今天复习（当前笔记）",
-      callback: () => void this.setCurrentDate("review", 0),
-    });
-    this.addCommand({
-      id: "set-review-tomorrow",
-      name: "设为明天复习（当前笔记）",
-      callback: () => void this.setCurrentDate("review", 1),
+      id: "stop-review-current",
+      name: "停止当前笔记复习",
+      callback: () => void this.stopReviewCurrent(),
     });
     this.addCommand({
       id: "manage-tags",
@@ -231,6 +255,23 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
           this.store.addHistory(file.path, file.basename);
           this.speech.onActiveFileChanged(file.path);
         }
+      }),
+    );
+
+    // Obsidian 原文右上角「更多选项」菜单：只对 Markdown 文件加入复习入口。
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof TFile) || file.extension !== "md") return;
+        menu.addItem((item) =>
+          item.setTitle("知识管理工作台：开始复习").onClick(() => {
+            void this.startReviewCurrent(file);
+          }),
+        );
+        menu.addItem((item) =>
+          item.setTitle("知识管理工作台：停止复习").onClick(() => {
+            void this.stopReviewCurrent(file);
+          }),
+        );
       }),
     );
 
@@ -382,16 +423,25 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
   }
 
   // ── v1.0.6：输入闭环 ─────────────────────────────────────
-  /** 接通此前零调用的 startReview()：为当前笔记建立首次复习计划。 */
-  async startReviewCurrent(): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== "md") {
+  /**
+   * 把指定笔记（默认当前活动笔记）加入艾宾浩斯复习序列。
+   * review / review-stage 两个 frontmatter 字段就是序列成员与当前轮次；
+   * 已在序列中的笔记保持原计划，重复点击不会重置进度。
+   */
+  async startReviewCurrent(file?: TFile): Promise<void> {
+    const target = file ?? this.app.workspace.getActiveFile();
+    if (!target || target.extension !== "md") {
       new Notice("请先打开一篇 Markdown 笔记。");
       return;
     }
-    const note = this.index.getNote(file.path);
+    const note = this.index.getNote(target.path);
     if (!note) {
       new Notice("该笔记尚未进入索引，请稍候重试。");
+      return;
+    }
+    if (note.review) {
+      const round = note.reviewStage + 1;
+      new Notice(`「${note.title}」已在复习序列，第 ${round} 轮下次复习：${note.review}。`);
       return;
     }
     const plan = startReview(
@@ -400,28 +450,31 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
       this.store.settings.reviewIntervals,
     );
     try {
-      await this.frontmatter.writeReview(file, plan.nextDate, plan.nextStage);
-      new Notice(`已为「${note.title}」安排首次复习：${plan.nextDate}`);
+      await this.frontmatter.writeReview(target, plan.nextDate, plan.nextStage);
+      new Notice(
+        `已把「${note.title}」加入复习序列：第 1 轮 ${plan.nextDate}（艾宾浩斯 ${plan.interval} 天）。`,
+      );
+      this.workbench.recompute();
     } catch (error) {
       console.error("[knowledge-workbench] start review failed", error);
       new Notice("写入复习日期失败，请查看控制台。");
     }
   }
 
-  /** due / review 快捷设置：today + offset 天。 */
-  async setCurrentDate(key: "due" | "review", offset: number): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== "md") {
+  /** 停止复习：从序列中删除，不改动笔记正文或 status。 */
+  async stopReviewCurrent(file?: TFile): Promise<void> {
+    const target = file ?? this.app.workspace.getActiveFile();
+    if (!target || target.extension !== "md") {
       new Notice("请先打开一篇 Markdown 笔记。");
       return;
     }
-    const value = addDays(todayString(), offset);
     try {
-      await this.frontmatter.writeDateField(file, key, value);
-      new Notice(`已把${key === "due" ? "到期" : "复习"}日期设为 ${value}`);
+      await this.frontmatter.removeReview(target);
+      new Notice(`已停止「${target.basename}」复习，并从复习序列中删除。`);
+      this.workbench.recompute();
     } catch (error) {
-      console.error("[knowledge-workbench] set date failed", error);
-      new Notice("写入日期失败，请查看控制台。");
+      console.error("[knowledge-workbench] stop review failed", error);
+      new Notice("删除复习安排失败，请查看控制台。");
     }
   }
 
@@ -447,16 +500,13 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
       } else if (kind === "review") {
         const note = this.index.getNote(path);
         const stage = note?.reviewStage ?? 0;
-        const next = planReview(
-          note ? [note] : [],
-          todayString(),
-          this.store.settings.reviewIntervals,
+        const intervals = this.store.settings.reviewIntervals;
+        const nextStage = Math.min(stage + 1, Math.max(0, intervals.length - 1));
+        const nextDate = nextReviewDate(todayString(), intervals, nextStage);
+        await this.frontmatter.writeReview(file, nextDate, nextStage);
+        new Notice(
+          `已完成第 ${stage + 1} 轮复习，下次 ${nextDate}（间隔 ${intervals[nextStage]} 天）。`,
         );
-        const nextDate = next.length
-          ? next[0].nextDate
-          : addDays(todayString(), this.store.settings.reviewIntervals[0] ?? 1);
-        await this.frontmatter.writeReview(file, nextDate, Math.min(stage + 1, Math.max(0, this.store.settings.reviewIntervals.length - 1)));
-        new Notice(`复习已推进，下次 ${nextDate}。`);
       } else if (typeof taskLine === "number") {
         await this.toggleTaskLine(file, taskLine);
         new Notice("已在原文勾选该任务。");
@@ -533,7 +583,7 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     this.index.rescan();
   }
 
-  /** 正文内联 #tag 替换：跳过 frontmatter 区与代码块，按整词边界替换。 */
+  /** 正文内联 #tag 替换：纯函数实现（frontmatter/代码块/链接锚点均不误伤），有变化才写回。 */
   private async replaceInlineTags(
     file: TFile,
     sources: string[],
@@ -542,36 +592,9 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
   ): Promise<boolean> {
     try {
       const text = await this.app.vault.read(file);
-      const lines = text.split(/\r?\n/);
-      let inFrontmatter = false;
-      let inFence = false;
-      let fmCount = 0;
-      const sourceLower = sources.map((s) => s.replace(/^#/, "").toLowerCase());
-      const changed = lines.map((raw) => {
-        if (fmCount < 2) {
-          fmCount += 1;
-          if (raw.trim() === "---") inFrontmatter = !inFrontmatter;
-          return raw;
-        }
-        if (/^\s*(```|~~~)/.test(raw)) {
-          inFence = !inFence;
-          return raw;
-        }
-        if (inFrontmatter || inFence) return raw;
-        return raw.replace(/#([\w\u4e00-\u9fa5/-]+)/g, (full, tagText: string) => {
-          const key = tagText.toLowerCase();
-          const hit =
-            sourceLower.includes(key) ||
-            (includeChildren && sourceLower.some((s) => key.startsWith(`${s}/`)));
-          if (!hit) return full;
-          const suffix = includeChildren && key.includes("/")
-            ? `/${key.slice(key.indexOf("/") + 1)}`
-            : "";
-          return `#${target}${suffix}`;
-        });
-      });
-      if (changed.join("\n") !== text) {
-        await this.app.vault.modify(file, changed.join("\n"));
+      const next = replaceInlineTags(text, sources, target, includeChildren);
+      if (next !== text) {
+        await this.app.vault.modify(file, next);
       }
       return true;
     } catch (error) {
@@ -604,11 +627,13 @@ export default class KnowledgeWorkbenchPlugin extends Plugin {
     }
   }
 
-  /** 设置页改变朗读引擎路径后调用：重新探测可选引擎并刷新界面。 */
-  refreshSpeechEngine(): void {
-    this.piperEngine?.prepare?.();
+  /**
+   * 设置页改变朗读引擎后调用：清除首选引擎的失败标记与旧诊断，允许用户改完
+   * 配置立即重试。P2-4：旧的云端刷新兼容入口已删除，
+   * preferredEngine 单路径已覆盖全部引擎切换场景。
+   */
+  async refreshSpeechEngine(): Promise<void> {
     this.speech.refreshPreferred();
-    this.speech.refreshCloud();
   }
 
   onunload(): void {

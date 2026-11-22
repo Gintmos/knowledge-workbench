@@ -271,12 +271,12 @@ test("今日：催办/待办按任务到期判定，复习到期与分组排序"
 });
 
 // ── 复习排期 ──────────────────────────────────────────────────
-test("复习：1/3/7/15/30 固定间隔、stage 到顶、到期排期与首次排期", () => {
+test("复习：艾宾浩斯 1/2/4/7/15/30/60 间隔、stage 到顶、到期排期与首次排期", () => {
   const intervals = DEFAULT_SETTINGS.reviewIntervals;
-  assert.deepEqual(intervals.map((_, index) => nextInterval(intervals, index)), [1, 3, 7, 15, 30]);
-  assert.equal(nextInterval(intervals, 99), 30);
+  assert.deepEqual(intervals.map((_, index) => nextInterval(intervals, index)), [1, 2, 4, 7, 15, 30, 60]);
+  assert.equal(nextInterval(intervals, 99), 60);
   assert.equal(nextReviewDate(TODAY, intervals, 0), "2026-11-16");
-  assert.equal(nextReviewDate(TODAY, intervals, 4), "2026-12-15");
+  assert.equal(nextReviewDate(TODAY, intervals, 4), "2026-11-30");
 
   const notes = [
     note("due.md", { review: "2026-11-14", reviewStage: 1 }),
@@ -287,8 +287,8 @@ test("复习：1/3/7/15/30 固定间隔、stage 到顶、到期排期与首次�
   assert.equal(plan.length, 1);
   assert.equal(plan[0].path, "due.md");
   assert.equal(plan[0].nextStage, 2);
-  assert.equal(plan[0].interval, 7);
-  assert.equal(plan[0].nextDate, "2026-11-22");
+  assert.equal(plan[0].interval, 4);
+  assert.equal(plan[0].nextDate, "2026-11-19");
 
   const first = startReview(notes[2], TODAY, intervals);
   assert.equal(first.nextStage, 0);

@@ -1,9 +1,9 @@
 {
   "id": "knowledge-workbench",
   "name": "Knowledge Workbench",
-  "version": "1.0.8",
+  "version": "1.0.10",
   "minAppVersion": "1.7.2",
-  "description": "Organize notes by tags, track due and review tasks, and open or read notes in your vault. All data stays local with zero network requests.",
+  "description": "Organize vault notes by tags, track due and review tasks, and read notes aloud. Works offline by default; only optional neural speech uses the network.",
   "author": "Gintmos",
   "authorUrl": "https://github.com/Gintmos",
   "isDesktopOnly": false

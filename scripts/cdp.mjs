@@ -9,7 +9,7 @@
  *
  * 依赖：Node 22 内置 WebSocket，无第三方依赖。
  */
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 
 const PORT = process.env.CDP_PORT || "9222";
@@ -117,6 +117,23 @@ async function evaluate(expression) {
 
 if (cmd === "eval") {
   const out = await evaluate(`(async () => { ${arg} })()`);
+  console.log(JSON.stringify(out.value ?? out.error, null, 2));
+  if (process.env.CDP_LOG) {
+    console.log("--- 控制台/异常 ---");
+    console.log(consoleEvents.slice(-40).join("\n") || "(无)");
+  }
+} else if (cmd === "evalfile") {
+  // 从文件读取完整脚本作为表达式执行（用于注入体积较大的 bundle）。
+  const expression = readFileSync(arg, "utf8");
+  const r = await send("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+    userGesture: true,
+  });
+  const out = r.exceptionDetails
+    ? { error: r.exceptionDetails.exception?.description || r.exceptionDetails.text }
+    : { value: r.result.value };
   console.log(JSON.stringify(out.value ?? out.error, null, 2));
   if (process.env.CDP_LOG) {
     console.log("--- 控制台/异常 ---");

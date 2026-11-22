@@ -199,9 +199,10 @@ test("FrontmatterService：写回需显式调用，字段与次数可核对", as
 
   await service.writeReview(file, "2026-11-22", 2);
   await service.writeSummary(file, "一条规则摘要");
+  await service.removeReview(file);
   const fm = app.fileManager.frontmatters.get("a.md") ?? {};
-  assert.equal(fm["review"], "2026-11-22");
-  assert.equal(fm["review-stage"], 2);
+  assert.equal(fm["review"], undefined);
+  assert.equal(fm["review-stage"], undefined);
   assert.equal(fm["kw-summary"], "一条规则摘要");
-  assert.equal(app.fileManager.writes.length, 2);
+  assert.equal(app.fileManager.writes.length, 3);
 });

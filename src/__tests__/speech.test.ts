@@ -84,6 +84,37 @@ test("朗读文本：v14 三类噪音全部为 0 且不丢字", () => {
   assert.equal(text.includes("\n\n"), false, "段落之间只用一个换行分隔，不出现空朗读段");
 });
 
+test("朗读文本：emoji 元数据行跳过，列表项独立成句不串成流水线", () => {
+  const noteWithEmojiMeta = `🏷标签：#阅读书单 #组织管理
+📁路径：00_知识框架/2_管理学/
+🔗关联笔记：[[中层管理者行动清单]]、[[博泽激励困境分析]]
+⏰创建时间：2026-09-14
+
+## 核心原则
+
+- **工具会过时**：读书为了看懂组织规律
+- **不逐字通读**：每读完一章做三行记录
+
+| 维度 | 内容 |
+|------|------|
+| 对应现实 | 决策权不足时如何施加影响力 |
+`;
+  const text = mdToSpeechText(noteWithEmojiMeta);
+  // 元数据整行跳过：既不读 emoji，也不读残留的「标签：路径：」流水线
+  assert.equal(text.includes("标签"), false);
+  assert.equal(text.includes("路径"), false);
+  assert.equal(text.includes("关联笔记"), false);
+  assert.equal(text.includes("创建时间"), false);
+  assert.equal(text.includes("2026-09-14"), false);
+  // 列表项与表格行各自独立成句，行尾有句号
+  assert.ok(text.includes("工具会过时：读书为了看懂组织规律。"), "列表项应独立成句");
+  assert.ok(text.includes("不逐字通读：每读完一章做三行记录。"));
+  assert.ok(text.includes("维度，内容。"), "表头应逐格读出且无对齐空格");
+  assert.ok(text.includes("对应现实，决策权不足时如何施加影响力。"));
+  // 不应出现「，读书为了…不逐字通读：」这种跨列表项串联
+  assert.equal(/规律，读书/.test(text), false);
+});
+
 test("清洗规则共用：P3 摘要仍跳过表格行，P5 朗读保留表格文字", () => {
   const row = "| 数值甲 | 数值乙 |";
   assert.equal(cleanMarkdownLine(row), "");

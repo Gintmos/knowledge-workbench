@@ -45,12 +45,13 @@ export class FrontmatterService {
     );
   }
 
-  /** v1.0.6：快捷设置日期字段（due / review），统一 yyyy-mm-dd。 */
-  async writeDateField(file: TFile, key: "due" | "review", value: string): Promise<void> {
+  /** 停止复习：从复习序列中移除，删除 review / review-stage 两个字段。 */
+  async removeReview(file: TFile): Promise<void> {
     await this.app.fileManager.processFrontMatter(
       file,
       (frontmatter: Record<string, unknown>) => {
-        frontmatter[key] = value;
+        delete frontmatter["review"];
+        delete frontmatter["review-stage"];
       },
     );
   }

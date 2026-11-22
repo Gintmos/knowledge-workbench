@@ -54,12 +54,20 @@ export interface SpeechEngine {
   /** 是否需要 10s pause/resume 保活；云端 <audio> 引擎不需要。 */
   needsKeepAlive?: boolean;
   supported(): boolean;
-  /** 可选：设置变化后主动准备模型，长耗时在后台进行。 */
-  prepare?(): void;
+  /** 可选：设置变化后主动准备模型。返回 Promise 便于界面等待后刷新检测状态。 */
+  prepare?(): void | Promise<void>;
+  /** 可选：不可用时的具体原因，设置页「朗读能力」直接展示，避免只显示「不可用」。 */
+  diagnostic?(): string;
   getVoices(): SpeechVoice[];
   /** 宿主是否确实提供了可用音色（Android WebView 常为 false）。 */
   hasVoices?(): boolean;
   speak(text: string, options: SpeakOptions, handlers: SpeakHandlers): void;
+  /**
+   * 可选：后台预合成下一段，命中缓存后播放可省去网络握手延迟。
+   * P2-2：isStale 由 SpeechService 传入，快照会话 token 与笔记路径；
+   * 合成完成后守卫返回 true 表示会话已失效，引擎必须丢弃结果、不写缓存。
+   */
+  prefetch?(text: string, options: SpeakOptions, isStale?: () => boolean): void;
   cancel(): void;
   pause(): void;
   resume(): void;
@@ -87,6 +95,13 @@ export interface SpeechSnapshot {
   resumable: boolean;
   /** 当前块文本预览，便于界面显示「正在朗读」。 */
   preview: string;
-  /** 当前生效的引擎：云端神经语音 / 系统语音 / 不可用。 */
+  /** 当前生效的引擎：Edge 神经语音 / 自定义网关 / 系统语音 / 不可用。 */
   engineLabel: string;
+  /** 首选引擎未就绪时的诊断（如缺少模型文件），仅在启用该引擎时填充。 */
+  engineDiagnostic?: string;
+  /**
+   * P1-1 / P1-2：最近一次首选引擎失败的可读诊断（如 Edge 403、网关 401）。
+   * 由设置页「朗读能力」展示，避免用户只看到「已回退系统语音」却不知原因。
+   */
+  engineLastError?: string;
 }

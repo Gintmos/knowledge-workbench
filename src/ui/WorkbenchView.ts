@@ -19,6 +19,7 @@ import {
   shouldLoadMore,
   todayCardTitle,
   writeCategory,
+  DETAIL_PAGE_SIZE,
   type ChartScope,
 } from "../domain/uiModel";
 import { VIEW_TYPE_WORKBENCH } from "../types";
@@ -29,6 +30,7 @@ import type {
   IndexStatus,
   NoteRecord,
   TodayItem,
+  TodayKind,
   WorkbenchTab,
 } from "../types";
 import { enableDragScroll, renderBarMeter } from "./Chart";
@@ -60,6 +62,8 @@ export class WorkbenchView extends ItemView {
   private category: string | null = null;
   private restoringScroll = false;
   private detailScroll = 0;
+  /** P2-5：「运行信息」折叠状态记在实例上，索引 emit 重渲染不再把展开状态复位。 */
+  private runtimeInfoOpen = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: KnowledgeWorkbenchPlugin) {
     super(leaf);
@@ -212,7 +216,8 @@ export class WorkbenchView extends ItemView {
     if (!this.scrollEl) return;
     this.restoringScroll = true;
     this.scrollEl.scrollTop = Math.max(0, y);
-    requestAnimationFrame(() => {
+    // P2-7：用宿主的 activeWindow，避免多窗口 / popout 下拿到错误的全局 rAF。
+    activeWindow.requestAnimationFrame(() => {
       this.restoringScroll = false;
     });
   }
@@ -252,11 +257,7 @@ export class WorkbenchView extends ItemView {
     }
     const groups = groupToday(domain.today.items);
     for (const [kind, items] of groups) {
-      card.createDiv({
-        cls: "kw-group-title",
-        text: `${KIND_LABEL[kind]} · ${items.length} 项`,
-      });
-      for (const item of items) this.renderTodayItem(card, item);
+      this.renderTodayGroup(card, kind, items);
     }
 
     const ics = card.createDiv({ cls: "kw-hint kw-today-ics" });
@@ -279,12 +280,42 @@ export class WorkbenchView extends ItemView {
     }
   }
 
-  private renderTodayItem(parent: HTMLElement, item: TodayItem): void {
+  /** P2-6：分组清单复用 60/页懒加载；无日期待办不设上限，长清单不再一次性渲染。 */
+  private renderTodayGroup(parent: HTMLElement, kind: TodayKind, items: TodayItem[]): void {
+    parent.createDiv({
+      cls: "kw-group-title",
+      text: `${KIND_LABEL[kind]} · ${items.length} 项`,
+    });
+    if (items.length <= DETAIL_PAGE_SIZE) {
+      for (const item of items) this.renderTodayItem(parent, item);
+      return;
+    }
+    const more = parent.createEl("button", { cls: "kw-load-more" });
+    more.setAttr("type", "button");
+    let loaded = 0;
+    const appendBatch = (): void => {
+      const from = loaded;
+      loaded = nextLoaded(loaded, items.length);
+      for (const item of items.slice(from, loaded)) {
+        this.renderTodayItem(parent, item, more);
+      }
+      const page = lazyPage(items, loaded);
+      if (page.hasMore) more.setText(`加载更多（还有 ${items.length - loaded} 项）`);
+      else more.setAttr("hidden", "true");
+    };
+    appendBatch();
+    more.addEventListener("click", appendBatch);
+  }
+
+  private renderTodayItem(parent: HTMLElement, item: TodayItem, before?: HTMLElement): void {
     const row = parent.createDiv({ cls: "kw-today-row" });
+    if (before) before.before(row);
     row.createSpan({ cls: "kw-kind", text: KIND_LABEL[item.kind] });
     const link = row.createEl("a", { cls: "kw-note-link", text: item.title });
     link.setAttr("href", "#");
     link.setAttr("aria-label", `打开「${item.title}」的原文窗口`);
+    // U-2：完整路径收进悬浮提示，窄栏 meta 行不再被路径撑高。
+    link.setAttr("title", item.path);
     link.addEventListener("click", (event: MouseEvent) => {
       event.preventDefault();
       this.openNote(item.path);
@@ -310,10 +341,11 @@ export class WorkbenchView extends ItemView {
       );
     });
 
-    row.createDiv({
-      cls: "kw-note-meta",
-      text: `${item.detail} · ${item.path}`,
-    });
+    // U-2：meta 只保留 detail；完整路径已移到标题与笔记名的 title 悬浮提示。
+    if (item.detail) {
+      const meta = row.createDiv({ cls: "kw-note-meta", text: item.detail });
+      meta.setAttr("title", `${item.detail} · ${item.path}`);
+    }
   }
 
   // ── 复习 ──────────────────────────────────────────────────
@@ -340,13 +372,13 @@ export class WorkbenchView extends ItemView {
     });
     planCard.createDiv({
       cls: "kw-hint",
-      text: "固定间隔 1/3/7/15/30 天；仅预览，不会自动改动笔记。明细区可滚动、可拖动。",
+      text: "艾宾浩斯间隔按天离散化，默认 1/2/4/7/15/30/60 天；到期项点「完成复习」后自动推进到下一轮并写回。明细区可滚动、可拖动。",
     });
     const detail = planCard.createDiv({ cls: "kw-detail" });
     if (!plan.length) {
       detail.createDiv({
         cls: "kw-empty",
-        text: "没有带 review 字段且已到期的笔记。给笔记添加 review 日期后，这里会生成排期。",
+        text: "没有已到期的复习项。在笔记里点「开始复习」加入艾宾浩斯序列后，到期时会出现在今日页与这里。",
       });
     }
     for (const item of plan) {
@@ -393,87 +425,7 @@ export class WorkbenchView extends ItemView {
   ): void {
     const selection = decodeSelection(this.category);
 
-    const card = parent.createDiv({ cls: "kw-card" });
-    card.createDiv({ cls: "kw-card-title", text: "索引状态" });
-    const grid = card.createDiv({ cls: "kw-grid" });
-    this.stat(grid, "阶段", PHASE_TEXT[status.phase] ?? status.phase);
-    this.stat(grid, "已索引", `${status.indexed} 篇`);
-    // v1.0.6：调试指标收进默认折叠的「运行信息」，常显只留阶段与篇数。
-    const runtime = card.createDiv({ cls: "kw-runtime-info" });
-    const runtimeToggle = runtime.createEl("button", {
-      cls: "kw-fold-btn kw-runtime-toggle",
-      text: "运行信息 ⌄",
-    });
-    runtimeToggle.setAttr("type", "button");
-    runtimeToggle.setAttr("aria-expanded", "false");
-    const runtimeBody = runtime.createDiv({ cls: "kw-runtime-body" });
-    runtimeBody.setAttr("hidden", "true");
-    this.stat(runtimeBody, "本次耗时", `${status.durationMs} ms`);
-    this.stat(runtimeBody, "主线程让出", `${status.yields} 次`);
-    this.stat(runtimeBody, "待补元数据", `${status.cacheMisses} 篇`);
-    runtimeToggle.addEventListener("click", () => {
-      const open = runtimeBody.hasAttribute("hidden");
-      if (open) runtimeBody.removeAttribute("hidden");
-      else runtimeBody.setAttr("hidden", "true");
-      runtimeToggle.setAttr("aria-expanded", String(open));
-      runtimeToggle.setText(open ? "运行信息 ⌃" : "运行信息 ⌄");
-    });
-    card.createDiv({ cls: "kw-hint", text: `index.json：${status.indexPath}` });
-    if (status.error) {
-      card.createDiv({ cls: "kw-error", text: `索引异常：${status.error}` });
-    }
-
-    const diff = status.diff;
-    if (diff?.initial) {
-      parent.createDiv({
-        cls: "kw-hint",
-        text: `首次索引完成，共 ${status.indexed} 篇；快照写入 vault 后，从下次启动开始提示差异。`,
-      });
-    } else if (diff && !isEmptyDiff(diff)) {
-      const box = parent.createDiv({ cls: "kw-card kw-diff" });
-      box.createDiv({
-        cls: "kw-card-title",
-        text: "与上次快照的差异（只读）",
-      });
-      box.createDiv({ cls: "kw-hint", text: describeDiff(diff) });
-      const list = box.createEl("ul", { cls: "kw-list" });
-      const groups: Array<[string, string[]]> = [
-        ["新增", diff.added],
-        ["修改", diff.modified],
-        ["减少", diff.removed],
-      ];
-      for (const [label, paths] of groups) {
-        for (const path of paths.slice(0, 3)) {
-          list.createEl("li", { text: `${label} · ${path}` });
-        }
-        if (paths.length > 3) {
-          list.createEl("li", {
-            text: `${label} · 另有 ${paths.length - 3} 篇`,
-          });
-        }
-      }
-      box.createDiv({
-        cls: "kw-hint",
-        text: "只读提示：不执行删除、不提供恢复；删除笔记请使用 Obsidian 自带的「移到回收站」。",
-      });
-    } else if (diff) {
-      parent.createDiv({ cls: "kw-hint", text: "与上次快照一致，无变化。" });
-    }
-
-    const icsCard = parent.createDiv({ cls: "kw-card" });
-    icsCard.createDiv({ cls: "kw-card-title", text: ".ics 提醒" });
-    const icsGrid = icsCard.createDiv({ cls: "kw-grid" });
-    this.stat(icsGrid, "状态", domain.ics.enabled ? "已启用" : "已关闭");
-    this.stat(icsGrid, "日程数", `${domain.ics.events} 条`);
-    this.stat(
-      icsGrid,
-      "最近写入",
-      domain.ics.lastWriteAt
-        ? new Date(domain.ics.lastWriteAt).toLocaleTimeString("zh-CN")
-        : "尚未写入",
-    );
-    icsCard.createDiv({ cls: "kw-hint", text: `路径：${domain.ics.path}` });
-
+    // U-3：业务数据优先——主分类 / 标签分布上移，索引状态与 .ics 状态卡下移。
     // 已有卡片：全量分类。不新增卡片、不改 layout；仅在下半部分列表每行加横向条。
     const countsCard = parent.createDiv({ cls: "kw-card" });
     countsCard.createDiv({
@@ -558,6 +510,19 @@ export class WorkbenchView extends ItemView {
         "detail",
         tagMax,
       );
+      // P2-4：top-30 截断必须有可见提示，避免用户误以为只有这些标签。
+      if (domain.tagCounts.length > 30) {
+        tagDetail.createDiv({
+          cls: "kw-hint",
+          text: `标签已显示前 30 个（共 ${domain.tagCounts.length} 个），完整列表可在「管理标签」中查看。`,
+        });
+      }
+      if (domain.folderCounts.length > 30) {
+        tagDetail.createDiv({
+          cls: "kw-hint",
+          text: `文件夹已显示前 30 个（共 ${domain.folderCounts.length} 个）。`,
+        });
+      }
       if (!domain.tagCounts.length && !domain.folderCounts.length) {
         tagDetail.createDiv({
           cls: "kw-empty",
@@ -565,6 +530,89 @@ export class WorkbenchView extends ItemView {
         });
       }
     }
+
+    // ── U-3：维护类信息下移（索引状态 / 只读差异 / .ics 状态）──────
+    const card = parent.createDiv({ cls: "kw-card" });
+    card.createDiv({ cls: "kw-card-title", text: "索引状态" });
+    const grid = card.createDiv({ cls: "kw-grid" });
+    this.stat(grid, "阶段", PHASE_TEXT[status.phase] ?? status.phase);
+    this.stat(grid, "已索引", `${status.indexed} 篇`);
+    // v1.0.6：调试指标收进默认折叠的「运行信息」，常显只留阶段与篇数。
+    const runtime = card.createDiv({ cls: "kw-runtime-info" });
+    const runtimeToggle = runtime.createEl("button", {
+      cls: "kw-fold-btn kw-runtime-toggle",
+      text: this.runtimeInfoOpen ? "运行信息 ⌃" : "运行信息 ⌄",
+    });
+    runtimeToggle.setAttr("type", "button");
+    runtimeToggle.setAttr("aria-expanded", String(this.runtimeInfoOpen));
+    const runtimeBody = runtime.createDiv({ cls: "kw-runtime-body" });
+    if (!this.runtimeInfoOpen) runtimeBody.setAttr("hidden", "true");
+    this.stat(runtimeBody, "本次耗时", `${status.durationMs} ms`);
+    this.stat(runtimeBody, "主线程让出", `${status.yields} 次`);
+    this.stat(runtimeBody, "待补元数据", `${status.cacheMisses} 篇`);
+    runtimeToggle.addEventListener("click", () => {
+      // P2-5：折叠状态记入实例字段，索引 emit 触发的重渲染不再把展开状态复位。
+      this.runtimeInfoOpen = !this.runtimeInfoOpen;
+      if (this.runtimeInfoOpen) runtimeBody.removeAttribute("hidden");
+      else runtimeBody.setAttr("hidden", "true");
+      runtimeToggle.setAttr("aria-expanded", String(this.runtimeInfoOpen));
+      runtimeToggle.setText(this.runtimeInfoOpen ? "运行信息 ⌃" : "运行信息 ⌄");
+    });
+    card.createDiv({ cls: "kw-hint", text: `index.json：${status.indexPath}` });
+    if (status.error) {
+      card.createDiv({ cls: "kw-error", text: `索引异常：${status.error}` });
+    }
+
+    const diff = status.diff;
+    if (diff?.initial) {
+      parent.createDiv({
+        cls: "kw-hint",
+        text: `首次索引完成，共 ${status.indexed} 篇；快照写入 vault 后，从下次启动开始提示差异。`,
+      });
+    } else if (diff && !isEmptyDiff(diff)) {
+      const box = parent.createDiv({ cls: "kw-card kw-diff" });
+      box.createDiv({
+        cls: "kw-card-title",
+        text: "与上次快照的差异（只读）",
+      });
+      box.createDiv({ cls: "kw-hint", text: describeDiff(diff) });
+      const list = box.createEl("ul", { cls: "kw-list" });
+      const groups: Array<[string, string[]]> = [
+        ["新增", diff.added],
+        ["修改", diff.modified],
+        ["减少", diff.removed],
+      ];
+      for (const [label, paths] of groups) {
+        for (const path of paths.slice(0, 3)) {
+          list.createEl("li", { text: `${label} · ${path}` });
+        }
+        if (paths.length > 3) {
+          list.createEl("li", {
+            text: `${label} · 另有 ${paths.length - 3} 篇`,
+          });
+        }
+      }
+      box.createDiv({
+        cls: "kw-hint",
+        text: "只读提示：不执行删除、不提供恢复；删除笔记请使用 Obsidian 自带的「移到回收站」。",
+      });
+    } else if (diff) {
+      parent.createDiv({ cls: "kw-hint", text: "与上次快照一致，无变化。" });
+    }
+
+    const icsCard = parent.createDiv({ cls: "kw-card" });
+    icsCard.createDiv({ cls: "kw-card-title", text: ".ics 提醒" });
+    const icsGrid = icsCard.createDiv({ cls: "kw-grid" });
+    this.stat(icsGrid, "状态", domain.ics.enabled ? "已启用" : "已关闭");
+    this.stat(icsGrid, "日程数", `${domain.ics.events} 条`);
+    this.stat(
+      icsGrid,
+      "最近写入",
+      domain.ics.lastWriteAt
+        ? new Date(domain.ics.lastWriteAt).toLocaleTimeString("zh-CN")
+        : "尚未写入",
+    );
+    icsCard.createDiv({ cls: "kw-hint", text: `路径：${domain.ics.path}` });
 
     // v1.0.6：四个维护按钮已移到设置页（那里有逐项说明），统计页不再重复摆放。
   }
@@ -612,7 +660,8 @@ export class WorkbenchView extends ItemView {
       text: `笔记清单 · ${slice.key}`,
     });
     const clear = head.createEl("button", {
-      cls: "kw-open-btn",
+      // U-7：导航类按钮用次级样式；保留 kw-open-btn 基类，兼容既有冒烟脚本选择器。
+      cls: "kw-open-btn kw-nav-btn",
       text: "返回分类列表",
     });
     clear.addEventListener("click", () => this.selectSlice(scope, null));
@@ -712,7 +761,8 @@ export class WorkbenchView extends ItemView {
   private renderFooter(parent: HTMLElement): void {
     parent.createDiv({
       cls: "kw-hint kw-footer",
-      text: `知识管理工作台 v${this.plugin.manifest.version} · 业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责。插件不发起任何网络请求，云端神经朗读已搁置。`,
+      // U-6/P0-3：默认离线、仅朗读可选联网，不再宣称"零网络/已搁置"。
+      text: `知识管理工作台 v${this.plugin.manifest.version} · 默认离线，仅朗读可选联网。业务数据存于笔记 frontmatter，派生数据存于 vault 内 index.json / .ics；跨设备同步由你既有的同步方案负责。`,
     });
   }
 
@@ -720,14 +770,13 @@ export class WorkbenchView extends ItemView {
   private openNote(path: string): void {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) {
-      this.plugin.store.patchView({
-        lastModal: path,
-        note: { path, title: file.basename },
-      });
       new NoteModal(this.app, file, {
         speech: this.plugin.speech,
         autoResume: () => this.plugin.store.settings.speechAutoResume,
         onExport: (title, text) => void this.plugin.saveSpeechDraft(title, text),
+        onRateChange: (rate) => this.plugin.store.updateSettings({ speechRate: rate }),
+        onStartReview: () => void this.plugin.startReviewCurrent(file),
+        onStopReview: () => void this.plugin.stopReviewCurrent(file),
       }).open();
     }
   }

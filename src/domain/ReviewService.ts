@@ -12,7 +12,10 @@ export interface ReviewPlanItem {
   interval: number;
 }
 
-/** 固定间隔 1/3/7/15/30 天，stage 到顶后保持最后一档，后续可升级 SM-2。 */
+/**
+ * 艾宾浩斯记忆曲线按「可提醒的整天」离散化：1/2/4/7/15/30/60 天。
+ * stage 到顶后保持最后一档；用户仍可在设置里改成自己的间隔。
+ */
 export function nextInterval(intervals: number[], stage: number): number {
   if (!intervals.length) return 1;
   const index = Math.min(Math.max(0, Math.floor(stage)), intervals.length - 1);
@@ -57,7 +60,7 @@ export function planReview(
   );
 }
 
-/** 给一篇尚未排期的笔记建立首次复习计划（由用户手动触发，不自动给全库加提醒）。 */
+/** 给一篇尚未排期的笔记建立艾宾浩斯首次复习计划（用户主动点「开始复习」才加入）。 */
 export function startReview(
   note: NoteRecord,
   today: string,

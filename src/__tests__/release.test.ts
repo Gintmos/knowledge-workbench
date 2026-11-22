@@ -143,9 +143,12 @@ test("基线 07 · 催办默认周期 30 天，任务逾期才进催办", () => 
   assert.deepEqual(followup.map((item) => item.task?.text), ["过期任务"]);
 });
 
-test("基线 08 · 复习固定间隔 1/3/7/15/30，到顶保持最后一档", () => {
-  assert.deepEqual(INTERVALS.map((_, stage) => nextInterval(INTERVALS, stage)), [1, 3, 7, 15, 30]);
-  assert.equal(nextInterval(INTERVALS, 99), 30);
+test("基线 08 · 艾宾浩斯复习间隔 1/2/4/7/15/30/60，到顶保持最后一档", () => {
+  assert.deepEqual(
+    INTERVALS.map((_, stage) => nextInterval(INTERVALS, stage)),
+    [1, 2, 4, 7, 15, 30, 60],
+  );
+  assert.equal(nextInterval(INTERVALS, 99), 60);
   assert.equal(nextInterval([], 0), 1);
 });
 
@@ -365,7 +368,10 @@ test("P6 09 · versions.json / package.json 与 manifest 版本一致", () => {
   assert.equal(versions[manifest.version], manifest.minAppVersion);
   assert.equal(pkg.version, manifest.version);
   assert.equal(pkg.name, manifest.id);
-  assert.ok(!pkg.dependencies || Object.keys(pkg.dependencies).length === 0, "零运行时依赖");
+  // 唯一允许的运行时依赖是 ws：Edge 神经语音需在 Electron 桌面端设置自定义
+  // Host/Origin/UA 头（浏览器原生 WebSocket 做不到）。除此之外保持零运行时依赖。
+  const deps = Object.keys(pkg.dependencies ?? {});
+  assert.deepEqual(deps, ["ws"], "运行时依赖仅允许 ws");
 });
 
 test("P6 10 · 设置页无顶层「常规」标题，分组标题不含「设置」", () => {
@@ -439,19 +445,85 @@ test("v1.0.2 02 · 统计页只有列表内横向条形，没有上方纵向 SVG
   assert.equal(css.includes(".kw-chart-bar"), false);
 });
 
-test("v1.0.2 03 · 云端神经朗读搁置：main.ts 不接线、设置页无地址/密钥输入", () => {
+test("朗读联网方案 · 自定义 TTS 网关已接线且配置完整", () => {
   const main = source(join("src", "main.ts"));
   const settings = source(join("src", "ui", "SettingsTab.ts"));
-  assert.equal(main.includes("createCloudTtsEngine"), false);
-  assert.equal(main.includes("cloudEngine:"), false);
-  assert.equal(settings.includes("启用云端神经语音"), false);
-  assert.equal(settings.includes("API 密钥"), false);
-  assert.ok(settings.includes("已搁置"));
-  assert.ok(source(join("src", "domain", "pluginData.ts")).includes("cloudTtsEnabled: false"));
+  assert.ok(main.includes("createCloudTtsEngine"));
+  assert.ok(main.includes("this.cloudEngine = createCloudTtsEngine"));
+  assert.ok(settings.includes("API 密钥"));
+  assert.ok(settings.includes("服务地址"));
+  assert.ok(settings.includes("启用自定义网关"));
+  assert.ok(settings.includes("自定义 TTS 网关"));
+  // 双重开关：normalize 不再强制把开启状态归零。
+  assert.equal(source(join("src", "domain", "pluginData.ts")).includes("cloudTtsEnabled: false"), false);
 });
 
-test("v1.0.2 04 · README / CHANGELOG 说明云端朗读已搁置与严格零网络", () => {
+test("朗读联网方案 · Edge 神经语音引擎存在且仅桌面动态加载", () => {
+  const main = source(join("src", "main.ts"));
+  // P1-1：协议常量已拆到零 Node 依赖的 edgeProtocol.ts，断言覆盖两个文件。
+  const edge =
+    source(join("src", "speech", "edgeEngine.ts")) +
+    source(join("src", "speech", "edgeProtocol.ts"));
+  assert.ok(main.includes("createEdgeEngine"));
+  // 手机端无 Node require，必须动态 import 且限定桌面，否则插件加载即崩。
+  assert.ok(main.includes('await import("./speech/edgeEngine")'));
+  assert.ok(main.includes("if (!Platform.isMobile)"));
+  assert.ok(edge.includes("generateSecMsGecV2"));
+  assert.ok(edge.includes("api.msedgeservices.com"));
+  assert.ok(edge.includes("chrome-extension://"));
+  assert.ok(edge.includes("resolveGecVersion"), "P1-1 版本号必须可热修");
+  assert.ok(edge.includes("describeEdgeFailure"), "P1-1 403 必须有诊断");
+});
+
+test("v1.0.2 04 / 1.0.9 · README 说明朗读为唯一联网例外、其余默认离线", () => {
   const readme = source("README.md");
-  assert.ok(/搁置/.test(readme) && /零网络/.test(readme));
+  // 朗读是唯一联网例外（Edge / 自定义网关），其余功能默认离线。
+  // 1.0.9 起不再使用绝对化的「零网络请求」表述，改断言为更准确的语义。
+  assert.ok(/联网/.test(readme) && /默认.*(离线|不联网)/.test(readme));
+  assert.ok(/朗读.*唯一.*联网/.test(readme), "须明确朗读是唯一联网例外");
+  assert.ok(/Edge/.test(readme) && /网关/.test(readme));
   assert.ok(source("CHANGELOG.md").includes("1.0.2"));
+});
+
+// P0-2 防回归：描述不得再宣称绝对「零网络请求」，必须写明默认离线 +
+// 仅可选神经朗读联网，与 Edge / 自定义网关的实际行为一致。
+test("1.0.9 01 · manifest / package 描述与实际联网行为一致", () => {
+  const manifest = JSON.parse(source("manifest.json"));
+  const pkg = JSON.parse(source("package.json"));
+  for (const text of [manifest.description, pkg.description]) {
+    assert.ok(/offline by default/i.test(String(text)), "描述须声明默认离线");
+    assert.ok(/speech|read aloud|voice/i.test(String(text)), "描述须点明朗读语音");
+    assert.ok(/network/i.test(String(text)), "描述须说明联网例外");
+    assert.equal(/zero network|no network/i.test(String(text)), false, "不得再宣称绝对零网络");
+  }
+});
+
+// ── 第四步 P2-5/P2-6/P2-7：校验工具链自身的防回归 ────────────
+test("P2-5 01 · UI 自动冒烟脚本已接入 npm 清单且保持只读边界", () => {
+  const pkg = JSON.parse(source("package.json"));
+  assert.equal(pkg.scripts["smoke:ui"], "node scripts/ui-smoke.mjs", "smoke:ui 入口须存在");
+  const smoke = source(join("scripts", "ui-smoke.mjs"));
+  assert.ok(smoke.includes("ui-smoke.json"), "须输出结构化报告");
+  assert.ok(smoke.includes("不改笔记"), "须声明只读边界（不改笔记 / 不写 frontmatter）");
+  assert.ok(smoke.includes("CDP_SETTINGS_TITLE"), "设置 popout 须支持按标题定位");
+  assert.ok(smoke.includes("open-workbench-today"), "验证结束须停回「今日」");
+  for (const sel of ["kw-speech-engine", "kw-speech-rate", "kw-fm-grid", "kw-gateway-status", "kw-footer"]) {
+    assert.ok(smoke.includes(sel), `冒烟缺少 ${sel} 的界面断言`);
+  }
+});
+
+test("P2-6/7 01 · lint:obsidian 基线归零且两类调用为 Error 级", () => {
+  const lint = source(join("scripts", "lint-obsidian.mjs"));
+  assert.ok(/"no-global-this":\s*0/.test(lint), "globalThis 基线须为 0");
+  assert.ok(/"prefer-active-window \/ 裸 requestAnimationFrame":\s*0/.test(lint), "裸 rAF 基线须为 0");
+  assert.ok(/scan\(sourceFiles, "no-global-this/.test(lint), "globalThis 须为 Error 级扫描");
+  assert.ok(/scan\(sourceFiles, "prefer-active-window/.test(lint), "裸 rAF 须为 Error 级扫描");
+});
+
+test("P2 02 · 行为回归单测覆盖 P2-1~P2-7 全部七项", () => {
+  const p2 = source(join("src", "__tests__", "p2.test.ts"));
+  for (const tag of ["P2-1", "P2-2", "P2-3", "P2-4", "P2-6/7"]) {
+    assert.ok(p2.includes(tag), `p2.test.ts 缺少 ${tag} 用例`);
+  }
+  assert.ok(p2.includes("createAudioEngineCore"), "共享音频核心须被直接测到");
 });

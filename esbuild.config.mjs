@@ -1,13 +1,19 @@
 import esbuild from "esbuild";
 import process from "node:process";
 import { builtinModules } from "node:module";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const here = fileURLToPath(new URL(".", import.meta.url));
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 
 const options = {
   entryPoints: ["src/main.ts"],
   bundle: true,
+  // Edge 神经语音需要设置自定义 Host/Origin/UA 头，浏览器原生 WebSocket 做不到，
+  // 因此强制 ws 走 Node codepath（Electron 桌面端内置 Node，可 require 到 http/net/tls）。
+  alias: { ws: resolve(here, "node_modules/ws/index.js") },
   external: [
     "obsidian",
     "electron",

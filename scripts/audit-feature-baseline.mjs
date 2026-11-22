@@ -25,7 +25,6 @@ const SRC = {
   settings: read("src/ui/SettingsTab.ts"),
   speech: read("src/data/SpeechService.ts"),
   engine: read("src/speech/engine.ts"),
-  piper: read("src/speech/piperEngine.ts"),
   chunks: read("src/speech/chunks.ts"),
   ics: read("src/domain/ics.ts"),
   summary: read("src/domain/SummaryService.ts"),
@@ -125,16 +124,50 @@ check("G 朗读", "可拖进度条 / 断点续读", "SpeechBar + ReadProgress",
 check("G 朗读", "手机端能力检测 + 中文提示 / 朗读稿降级", "Platform.isMobile",
   /Platform\.isMobile/.test(SRC.main) && /朗读稿/.test(SRC.view + SRC.settings),
   ["移动端检测", "朗读稿替代路径"]);
-check("G 朗读", "Piper 本地语音（离线神经）", "piperEngine + WASM 推理",
-  /createPiperEngine/.test(SRC.piper) && /InferenceSession/.test(SRC.piper) && /encodeWav/.test(SRC.piper),
-  ["VITS 推理", "音素 WASM", "WAV 输出", "失败回退系统语音"]);
 const BUILT = read("main.js");
-check("G 朗读", "云端神经朗读搁置（零网络）", "cloud.ts 不被 main.ts 导入；产物无 requestUrl",
-  !/import[^;]*speech\/cloud/.test(SRC.main) && !/requestUrl|\bfetch\(/i.test(SRC.main)
-    && BUILT.length > 0 && !/\brequestUrl\b/.test(BUILT) && !/\bfetch\s*\(/.test(BUILT)
-    && !/https?:\/\//.test(BUILT),
-  ["main.ts 不导入 cloud.ts（仅注释提及）", "main.ts 无 requestUrl / fetch",
-   `产物 main.js ${BUILT.length} 字节：无 requestUrl / fetch / 外部 URL`]);
+// P1-1：协议常量拆到 edgeProtocol.ts（零 Node 依赖），基线证据覆盖两个文件。
+const EDGE = read("src/speech/edgeEngine.ts") + read("src/speech/edgeProtocol.ts");
+const CLOUD = read("src/speech/cloud.ts");
+// P2-3：两个联网引擎的音频缓存 / 播放 / 预取已收敛到共享核心。
+const AUDIO_CORE = read("src/speech/audioCore.ts");
+const UI_SMOKE = read("scripts/ui-smoke.mjs");
+const OBSIDIAN_LINT = read("scripts/lint-obsidian.mjs");
+check("G 朗读", "安卓语音预设（国内神经 TTS 一键配置）", "安卓语音预设下拉 + 网关配置",
+  /安卓语音预设/.test(SRC.settings) && /cosyvoice-v3-flash/.test(SRC.settings) &&
+    /dashscope\.aliyuncs\.com/.test(SRC.settings) && /speechEngine: "cloud"/.test(SRC.settings),
+  ["预置阿里云百炼 CosyVoice3 / Qwen-TTS / 硅基流动 / OpenAI", "选中即填地址+模型+音色并切到网关"]);
+check("G 朗读", "语速下拉 + 暂停拖动续播状态同步", "SpeechBar 语速 select + pendingResumeFromSeek",
+  /kw-speech-rate/.test(SRC.styles) && /onRateChange/.test(SRC.modal) &&
+    /pendingResumeFromSeek/.test(SRC.speech),
+  ["朗读窗口语速下拉", "暂停后拖动进度条再继续可直接播放"]);
+check("G 朗读", "暂停后自动回退误判修复（有限重试 + 短退避）", "PREFERRED_RETRY_LIMIT + engineFailures + 退避",
+  /PREFERRED_RETRY_LIMIT/.test(SRC.speech) && /engineFailures/.test(SRC.speech) &&
+    /PREFERRED_RETRY_BACKOFF_MS/.test(SRC.speech) && /retryTicket/.test(SRC.speech) &&
+    /prefetchNext/.test(SRC.speech) && /prefetch/.test(AUDIO_CORE),
+  ["连续失败才回退系统语音；P2-1 第 1/2 次退避 300/600ms，过期回调作废",
+   "P2-2 预取携带 token + 会话守卫；P2-3 缓存/播放/预取收敛到 audioCore.ts"]);
+check("G 朗读", "P1-1 Edge 接口版本可热修 + 403 可诊断（不再静默降级）", "设置页覆盖值 / 协议常量 / 朗读能力回传",
+  /edgeGecVersion:\s*""/.test(SRC.types) &&
+    /resolveGecVersion/.test(EDGE) &&
+    /describeEdgeFailure/.test(EDGE) &&
+    /unexpected-response/.test(EDGE) &&
+    /engineLastError/.test(SRC.speech) &&
+    /Edge 接口版本/.test(SRC.settings),
+  ["留空用内置版本；非法值回退；403 给出可操作热修指引",
+   "最近一次失败诊断回传设置页「朗读能力」"]);
+check("G 朗读", "语音联网为唯一例外且受控（Edge 桌面 + 自定义网关双端）",
+  "两个联网引擎默认关闭；Edge 仅桌面动态加载；其余功能零网络",
+  /await import\(["'][^"']*speech\/edgeEngine["']\)/.test(SRC.main) &&
+    /!Platform\.isMobile[\s\S]{0,120}await import/.test(SRC.main) &&
+    /createCloudTtsEngine/.test(SRC.main) &&
+    /cloudTtsEnabled:\s*false/.test(SRC.types) &&
+    /speechEngine:\s*"system"/.test(SRC.types) &&
+    /generateSecMsGecV2/.test(EDGE) && /api\.msedgeservices\.com/.test(EDGE) &&
+    !/requestUrl|\bfetch\(/i.test(SRC.main) &&
+    BUILT.length > 0,
+  ["main.ts 中 Edge 仅桌面动态 import，cloud 用宿主 requestUrl",
+   "默认引擎仍是 system、cloudTtsEnabled 默认 false",
+   `Edge DRM v2 + 新端点；产物 main.js ${BUILT.length} 字节`]);
 
 // ── H. 设置与标签管理 ────────────────────────────────────────
 check("H 设置", "分组 + (i) 折叠说明 + 版本号", "PluginSettingTab + addInfo",
@@ -156,18 +189,90 @@ check("H 设置", "导出笔记目录", "catalog.renderCatalog",
 check("I 工程", "isDesktopOnly = false（双端同一份代码）", "manifest",
   /"isDesktopOnly":\s*false/.test(SRC.manifest),
   ["manifest.isDesktopOnly=false"]);
-check("I 工程", "零网络：产物无 requestUrl / fetch", "release-check 断言",
-  /requestUrl/.test(read("scripts/release-check.mjs")),
-  ["发布检查断言零网络"]);
+const RELEASE_SCRIPT = read("scripts/release-check.mjs");
+check("I 工程", "默认离线：非语音代码禁 requestUrl / fetch，语音为受控例外", "release-check 白名单断言",
+  /NETWORK_ALLOWED/.test(RELEASE_SCRIPT) &&
+    /非语音代码发起网络请求/.test(RELEASE_SCRIPT) &&
+    /requestUrl/.test(RELEASE_SCRIPT),
+  ["发布检查以白名单方式只允许语音引擎联网，其余源码严格零网络"]);
 check("I 工程", "无 Node/Electron API 依赖", "main.ts 不 import node/electron",
   !/from "node:|require\("node:|from "electron"/.test(SRC.main),
   ["main.ts 无 node/electron 导入"]);
 check("I 工程", "A2HS / 自动同步 / LLM 端点全部移除", "全源码无残留",
   !/A2HS|llmEndpoint|autoSync/i.test(SRC.main + SRC.settings + SRC.uiModel),
   ["无 A2HS / LLM 端点 / 自动同步入口"]);
-check("I 工程", "README 明确 .ics 替代 / 零网络 / 回滚", "README 说明",
-  /\.ics/.test(SRC.readme) && /零网络/.test(SRC.readme) && /回滚/.test(SRC.readme),
-  ["README 三项声明齐全"]);
+check("I 工程", "P1-3 社区 lint 规则集本地可复核（lint:obsidian 零依赖门禁）", "scripts/lint-obsidian.mjs + npm script",
+  /lint:obsidian/.test(SRC.pkg) &&
+    /no-unsafe-dynamic-import/.test(read("scripts/lint-obsidian.mjs")) &&
+    /no-global-this/.test(read("scripts/lint-obsidian.mjs")),
+  ["Error 级零容忍；Warning 与 P2-6/P2-7/P1-4 基线对齐",
+   "官方插件需 ESLint 9，与本项目 ESLint 8 体系不兼容，故用等价本地规则"]);
+check("I 工程", "P1-4 Node require 由桌面动态 import 门控，双端不降级", "Platform.isMobile + isDesktopOnly=false",
+  /!Platform\.isMobile[\s\S]{0,200}await import/.test(SRC.main) &&
+    /"isDesktopOnly":\s*false/.test(SRC.manifest) &&
+    /allowedRequires/.test(RELEASE_SCRIPT),
+  ["产物 require 清单由发布自检白名单守护", "不将 isDesktopOnly 改为 true"]);
+check("I 工程", "README 明确 .ics 替代 / 默认离线且朗读为例外 / 回滚", "README 说明",
+  /\.ics/.test(SRC.readme) &&
+    /默认.*(离线|不联网)/.test(SRC.readme) &&
+    /朗读.*唯一.*联网/.test(SRC.readme) &&
+    /回滚/.test(SRC.readme),
+  ["README 三项声明齐全，且默认离线口径与联网例外一致（1.0.9）"]);
+// P2-5：把第一 / 二 / 三步手工 CDP 的 UI 结论固化为自动冒烟，纳入校验清单。
+const P2_TEST = read("src/__tests__/p2.test.ts");
+check("I 工程", "P2-5 UI 结论脚本化（CDP 只读冒烟 + 结构化报告）", "scripts/ui-smoke.mjs + smoke:ui",
+  /ui-smoke\.json/.test(UI_SMOKE) &&
+    /CDP_SETTINGS_TITLE/.test(UI_SMOKE) &&
+    /不改笔记/.test(UI_SMOKE) &&
+    /kw-speech-engine/.test(UI_SMOKE) &&
+    /kw-fm-grid/.test(UI_SMOKE) &&
+    /"smoke:ui"/.test(SRC.pkg),
+  ["覆盖版本栏 / 四页签 / 页脚离线口径 / U-1 引擎标签 / 语速 5 档 / U-9 属性折叠 / U-3 卡片顺序 / 设置页",
+   "只读 DOM + 打开视图弹窗，验证结束关闭弹窗并停回「今日」"]);
+check("I 工程", "P2-6/P2-7 globalThis 与裸 rAF 清零并提升为 Error 级", "lint:obsidian 基线 0",
+  /"no-global-this":\s*0/.test(OBSIDIAN_LINT) &&
+    /"prefer-active-window \/ 裸 requestAnimationFrame":\s*0/.test(OBSIDIAN_LINT) &&
+    /activeWindow\.requestAnimationFrame/.test(OBSIDIAN_LINT),
+  ["17 处 globalThis.* 统一 window.*；裸 rAF 改 activeWindow.requestAnimationFrame",
+   "Error 级零容忍 + 基线强制比对，新增违规即 FAIL"]);
+check("I 工程", "P2 工程债有行为级回归（退避 / 预取守卫 / 共享核心 / 死路径）", "p2.test.ts",
+  ["delays", "retryTicket", "isStale", "prefetched", "createAudioEngineCore", "cloudEngine"].every(
+    (tag) => P2_TEST.includes(tag),
+  ),
+  ["P2-1 短退避 300/600ms 与过期回调作废", "P2-2 预取会话守卫", "P2-3 共享音频核心 LRU/in-flight",
+   "P2-4 死路径静态断言", "P2-6/7 宿主 API 扫描"]);
+
+// 复审 V2（1.0.10）：P1-1/P1-2 + P2-1~8 的功能基线。
+const P3_TEST = read("src/__tests__/p3.test.ts");
+const INLINE_TAGS = read("src/domain/inlineTags.ts");
+check("J 复审V2", "P1-1 内联标签替换纯函数化并接入批量标签链路", "src/domain/inlineTags.ts + main.ts",
+  /splitFrontmatterLines/.test(INLINE_TAGS) &&
+    INLINE_TAGS.includes("replaceInlineTags") &&
+    SRC.main.includes('from "./domain/inlineTags"') &&
+    !SRC.main.includes("fmCount"),
+  ["带/无 frontmatter、代码块、子标签、YAML 注释、wiki/MD 锚点保护均有单测",
+   "修复「带 frontmatter 笔记正文一个都不替换且恒报成功」的缺陷"]);
+check("J 复审V2", "P1-2 无效设置已删除且数据兼容保留", "SettingsTab / TaskService / types",
+  !SRC.settings.includes("staleDays") &&
+    !read("src/domain/TaskService.ts").includes("staleBaseDate") &&
+    SRC.types.includes("staleDays"),
+  ["设置页不再展示无效的「催办默认周期」，不再触发无意义全库重扫",
+   "WorkbenchSettings.staleDays 字段仅作旧 data.json 归一化兼容"]);
+check("J 复审V2", "P2-1~8 复审修复有行为级回归", "p3.test.ts",
+  ["P2-1", "P2-2", "P2-3", "P2-4", "P2-5", "P2-6", "P2-7", "P2-8"].every(
+    (tag) => P3_TEST.includes(tag),
+  ),
+  ["P2-1 自由语速动态档", "P2-2 Piper 残留清零", "P2-3 死状态清零",
+   "P2-4 截断提示", "P2-5 折叠持久", "P2-6 今日页懒加载",
+   "P2-7 弹窗两步确认替代原生 confirm", "P2-8 音色下拉随 voiceschanged 刷新"]);
+
+check("J 复审V2", "清空密钥按钮可移除本机凭据且网关立即不再联网", "SettingsTab / cloud",
+  SRC.settings.includes("清空已保存的 API 密钥") &&
+    SRC.settings.includes("clearKeyArmed") &&
+    SRC.settings.includes('cloudTtsKey: ""') &&
+    /config\.key\.trim\(\)\.length > 0/.test(read("src/speech/cloud.ts")),
+  ["两步确认避免误触，只清 cloudTtsKey，不动服务地址 / 模型 / 音色 / 引擎开关",
+   "网关 supported() 实时读配置，密钥为空即不再发起联网请求；密码输入框与就绪状态条同步刷新"]);
 
 // ── 汇总 ───────────────────────────────────────────────────
 const groups = [...new Set(results.map((r) => r.group))];

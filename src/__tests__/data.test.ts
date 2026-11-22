@@ -3,7 +3,7 @@ import test from "node:test";
 import { scanInBatches } from "../domain/batchScan";
 import { computeDiff, describeDiff, isEmptyDiff } from "../domain/indexDiff";
 import { buildNoteRecord, truncateSummary } from "../domain/noteRecord";
-import { migratePaths, normalizeData, pushHistory } from "../domain/pluginData";
+import { migratePaths, normalizeData, normalizeSettings, pushHistory } from "../domain/pluginData";
 import { buildSnapshot, normalizeSnapshot, serializeSnapshot } from "../domain/snapshot";
 import { StoreService, type DataPersister } from "../data/StoreService";
 import {
@@ -189,14 +189,13 @@ test("normalizeData：合并默认值、修正脏值、裁剪历史到 20 篇", 
     at: index,
   }));
   const data = normalizeData({
-    view: { tab: "bad", scrollY: -5, lastModal: "n1.md" },
+    view: { tab: "bad", scrollY: -5 },
     history: rawHistory,
     read: { "a.md": { idx: 3, total: 9, at: 1 }, "bad.md": "oops" },
     settings: { staleDays: 0, reviewIntervals: [], speechRate: 99, indexPath: "" },
   });
   assert.equal(data.view.tab, "today");
   assert.equal(data.view.scrollY, 0);
-  assert.equal(data.view.mdView, false);
   assert.deepEqual(data.view.tabDetail, {});
   assert.equal(data.history.length, HISTORY_LIMIT);
   assert.equal(data.history[0].path, "n24.md");
@@ -206,6 +205,17 @@ test("normalizeData：合并默认值、修正脏值、裁剪历史到 20 篇", 
   assert.equal(data.settings.speechRate, 3);
   assert.equal(data.settings.indexPath, DEFAULT_SETTINGS.indexPath);
   assert.equal(normalizeData("garbage").version, 1);
+});
+
+test("normalizeSettings：旧默认复习间隔迁移到艾宾浩斯，自定义间隔保留", () => {
+  assert.deepEqual(
+    normalizeSettings({ reviewIntervals: [1, 3, 7, 15, 30] }).reviewIntervals,
+    DEFAULT_SETTINGS.reviewIntervals,
+  );
+  assert.deepEqual(
+    normalizeSettings({ reviewIntervals: [2, 5, 9] }).reviewIntervals,
+    [2, 5, 9],
+  );
 });
 
 test("pushHistory：最新在前、按 path 去重、保留 20 篇上限", () => {
@@ -225,19 +235,16 @@ test("pushHistory：最新在前、按 path 去重、保留 20 篇上限", () =>
   assert.equal(pushHistory(many, { path: "new.md", title: "新", at: 100 }).length, HISTORY_LIMIT);
 });
 
-test("migratePaths：重命名时迁移朗读断点、历史、当前笔记与弹窗记录", () => {
+test("migratePaths：重命名时迁移朗读断点与历史记录", () => {
   const data = normalizeData({
     read: { "旧.md": { idx: 4, total: 20, at: 3 } },
     history: [{ path: "旧.md", title: "旧", at: 1 }],
-    view: { note: { path: "旧.md", title: "旧" }, lastModal: "旧.md" },
   });
   const next = migratePaths(data, "旧.md", "新.md", "新");
   assert.equal(next.read["旧.md"], undefined);
   assert.equal(next.read["新.md"].idx, 4);
   assert.equal(next.history[0].path, "新.md");
   assert.equal(next.history[0].title, "新");
-  assert.deepEqual(next.view.note, { path: "新.md", title: "新" });
-  assert.equal(next.view.lastModal, "新.md");
   assert.equal(migratePaths(data, "", "x.md"), data);
 });
 

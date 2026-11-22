@@ -57,6 +57,12 @@ try {
     outfile: join(TMP, "entry.js"),
     external: ["node:*"],
     plugins: [mockObsidian],
+    // P2-6：源码统一改用宿主 window.* 定时器/performance。benchmark 在纯 Node 里
+    // 跑打包产物，没有 window，这里只给测试产物注入指向 globalThis 的宿主桩
+    // （与 run-tests.mjs 一致）；插件产物 main.js 不含该桩、不引入任何运行时依赖。
+    banner: {
+      js: 'if (typeof globalThis.window === "undefined") { globalThis.window = globalThis; }',
+    },
     logLevel: "warning",
   });
 

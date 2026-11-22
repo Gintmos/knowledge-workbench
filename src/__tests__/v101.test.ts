@@ -112,7 +112,7 @@ test("旧「知识库」页签映射到统计，坏死筛选值被清理", () =>
   );
 });
 
-test("v1.0.2 云端朗读搁置：默认关闭，旧 data.json 的开启状态强制归零", () => {
+test("自定义 TTS 网关：默认关闭（安全），但显式开启会被尊重", () => {
   assert.equal(DEFAULT_SETTINGS.cloudTtsEnabled, false);
   assert.equal(DEFAULT_SETTINGS.cloudTtsUrl, "");
   assert.equal(DEFAULT_SETTINGS.cloudTtsKey, "");
@@ -121,10 +121,10 @@ test("v1.0.2 云端朗读搁置：默认关闭，旧 data.json 的开启状态�
   assert.equal(settings.speechProsody, true);
   assert.equal(settings.speechPauseMs, 420);
   assert.ok(settings.cloudTtsModel.length > 0);
+  // 用户主动开启的联网方案必须保留（不再强制归零），是否真正联网仍受 speechEngine 双重开关约束。
   assert.equal(
-    normalizeSettings({ cloudTtsEnabled: true, cloudTtsUrl: "x.invalid" }).cloudTtsEnabled,
-    false,
-    "旧配置里残留的开启状态不得恢复云端入口",
+    normalizeSettings({ cloudTtsEnabled: true, cloudTtsUrl: "https://x.example/v1" }).cloudTtsEnabled,
+    true,
   );
 });
 
@@ -211,11 +211,12 @@ class FakeEngine implements SpeechEngine {
   }
 }
 
-function speechHarness(cloud: SpeechEngine | null, local: SpeechEngine | null) {
+function speechHarness(preferred: SpeechEngine | null, local: SpeechEngine | null) {
   const store = new Map<string, ReadProgress | null>();
   return new SpeechService({
     engine: local,
-    cloudEngine: cloud,
+    // P2-4：cloudEngine 兼容入口已删除，统一走 preferredEngine 单路径。
+    preferredEngine: preferred,
     mobile: true,
     progress: {
       get: (path) => store.get(path) ?? null,
@@ -226,10 +227,12 @@ function speechHarness(cloud: SpeechEngine | null, local: SpeechEngine | null) {
     },
     keepAliveMs: 0,
     silenceMs: 0,
+    // P2-1：单测用同步调度器保持断言确定性（生产为 300/600ms 短退避）。
+    scheduleRetry: (run) => run(),
   });
 }
 
-test("云端可用时优先云端；失败后自动回退系统语音并重说当前块", async () => {
+test("首选引擎可用时优先；失败后自动回退系统语音并重说当前块", async () => {
   const cloud = new FakeEngine("云端神经语音");
   const local = new FakeEngine("系统语音（规则式韵律）");
   const service = speechHarness(cloud, local);
@@ -241,10 +244,11 @@ test("云端可用时优先云端；失败后自动回退系统语音并重说�
   assert.ok(cloud.spoken[0].options.rateScale !== undefined);
   assert.ok(cloud.spoken[0].options.pitch !== undefined);
 
+  // 首选引擎持续失败：先做有限重试（偶发抖动可自愈），连续失败后才回退系统语音。
   cloud.failed = true;
   service.seek(0);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.ok(local.spoken.length >= 1, "云端失败后本地引擎接管");
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.ok(local.spoken.length >= 1, "连续失败达阈值后本地引擎接管");
   assert.equal(service.getSnapshot().engineLabel, "系统语音（规则式韵律）");
   assert.ok(service.getSnapshot().message.includes("回退"));
   service.dispose();

@@ -31,6 +31,9 @@ export class TagManagerModal extends Modal {
   private includeChildren = true;
   private replaceInline = false;
   private previewEl?: HTMLElement;
+  private confirmBtn?: HTMLButtonElement;
+  /** P2-7：弹窗内两步确认状态（替代浏览器原生对话框，移动端不再有兼容风险）。 */
+  private armed = false;
 
   constructor(app: App, options: TagManagerOptions) {
     super(app);
@@ -116,6 +119,7 @@ export class TagManagerModal extends Modal {
     inline.checked = this.replaceInline;
     inline.addEventListener("change", () => {
       this.replaceInline = inline.checked;
+      this.resetConfirm();
     });
     inlineRow.createEl("label", {
       attr: { for: "kw-replace-inline" },
@@ -134,11 +138,13 @@ export class TagManagerModal extends Modal {
       text: "确认修改",
     });
     confirm.setAttr("type", "button");
+    this.confirmBtn = confirm;
     confirm.addEventListener("click", () => void this.confirm(targetInput));
   }
 
   private refreshPreview(): void {
     if (!this.previewEl) return;
+    this.resetConfirm();
     this.previewEl.empty();
     const targetReady = this.target.trim().length > 0;
     if (!this.sources.length || !targetReady) {
@@ -169,21 +175,39 @@ export class TagManagerModal extends Modal {
     }
   }
 
+  /** 恢复未确认状态：按钮文本、警示样式与预览区的警示行一并复位。 */
+  private resetConfirm(): void {
+    if (!this.armed) return;
+    this.armed = false;
+    this.confirmBtn?.setText("确认修改");
+    this.confirmBtn?.removeClass("mod-warning");
+    this.previewEl?.querySelectorAll(".kw-tag-confirm-warn").forEach((el) => el.remove());
+  }
+
   private async confirm(targetInput: HTMLInputElement): Promise<void> {
     const target = (this.target || targetInput.value).trim();
     if (!this.sources.length || !target) {
+      this.resetConfirm();
       return;
     }
-    const preview = previewTagEdit(
-      this.options.notes(),
-      this.sources,
-      target,
-      this.includeChildren,
-    );
-    const ok = window.confirm(
-      `将修改 ${preview.paths.length} 篇笔记的标签：\n${this.sources.map((s) => `#${s}`).join("、")} → #${target}\n\n此操作会写入笔记，确认继续？`,
-    );
-    if (!ok) return;
+    if (!this.armed) {
+      // 第一步：展示影响摘要，把按钮变成「再次确认」；任何输入变化都会复位。
+      const preview = previewTagEdit(
+        this.options.notes(),
+        this.sources,
+        target,
+        this.includeChildren,
+      );
+      this.armed = true;
+      this.confirmBtn?.setText(`再次点击确认：将修改 ${preview.paths.length} 篇`);
+      this.confirmBtn?.addClass("mod-warning");
+      this.previewEl?.createDiv({
+        cls: "kw-tag-confirm-warn",
+        text: `即将把 ${this.sources.map((s) => `#${s}`).join("、")} 写为 #${target}，影响 ${preview.paths.length} 篇笔记。再点一次执行；改动上面任意输入会取消。`,
+      });
+      return;
+    }
+    this.resetConfirm();
     await this.options.onExecute(
       this.sources,
       target,

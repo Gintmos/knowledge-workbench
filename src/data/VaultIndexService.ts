@@ -96,8 +96,8 @@ export class VaultIndexService {
   private readonly pendingRemove = new Set<string>();
   private readonly missingCache = new Set<string>();
 
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private writeTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushTimer: number | null = null;
+  private writeTimer: number | null = null;
   private scanSignal: ScanSignal | null = null;
   private disposed = false;
   private lastProgressEmit = 0;
@@ -413,7 +413,7 @@ export class VaultIndexService {
   private scheduleFlush(delay: number): void {
     if (this.disposed) return;
     this.clearFlushTimer();
-    this.flushTimer = globalThis.setTimeout(() => {
+    this.flushTimer = window.setTimeout(() => {
       this.flushTimer = null;
       void this.flushPending();
     }, delay);
@@ -466,7 +466,7 @@ export class VaultIndexService {
   private scheduleWrite(delay: number): void {
     if (this.disposed) return;
     this.clearWriteTimer();
-    this.writeTimer = globalThis.setTimeout(() => {
+    this.writeTimer = window.setTimeout(() => {
       this.writeTimer = null;
       void this.writeSnapshot();
     }, delay);
@@ -506,14 +506,14 @@ export class VaultIndexService {
 
   private clearFlushTimer(): void {
     if (this.flushTimer !== null) {
-      globalThis.clearTimeout(this.flushTimer);
+      window.clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
   }
 
   private clearWriteTimer(): void {
     if (this.writeTimer !== null) {
-      globalThis.clearTimeout(this.writeTimer);
+      window.clearTimeout(this.writeTimer);
       this.writeTimer = null;
     }
   }

@@ -19,7 +19,20 @@ export interface SpeechBarOptions {
   autoResume?: () => boolean;
   /** 保存朗读稿到 vault，供 Android 交给系统「随选朗读」。 */
   onExport?: (text: string) => void;
+  /** 语速变化回调：持久化到设置，供下次朗读沿用。 */
+  onRateChange?: (rate: number) => void;
 }
+
+/** 朗读窗口语速档位（覆盖服务层 0.5–3 的常用区间）。 */
+export const SPEED_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0.75, label: "0.75× 慢" },
+  { value: 1, label: "1× 正常" },
+  { value: 1.25, label: "1.25× 快" },
+  { value: 1.5, label: "1.5× 快" },
+  { value: 2, label: "2× 很快" },
+];
+export const SPEED_OPTIONS_MIN = Math.min(...SPEED_OPTIONS.map((o) => o.value));
+export const SPEED_OPTIONS_MAX = Math.max(...SPEED_OPTIONS.map((o) => o.value));
 
 export class SpeechBar {
   private readonly speech: SpeechService;
@@ -38,7 +51,9 @@ export class SpeechBar {
   private readonly hintEl: HTMLElement;
   private readonly engineEl: HTMLElement;
   private readonly fallbackEl: HTMLElement;
+  private readonly rateSelect: HTMLSelectElement;
   private readonly onExport?: (text: string) => void;
+  private readonly onRateChange?: (rate: number) => void;
   private unsubscribe?: () => void;
   private dragging = false;
   private previewRatio: number | null = null;
@@ -58,6 +73,22 @@ export class SpeechBar {
     this.stopBtn = row.createEl("button", { cls: "kw-speech-btn", text: "停止" });
     this.countEl = row.createSpan({ cls: "kw-speech-count", text: "0 / 0 段" });
     this.stateEl = row.createSpan({ cls: "kw-speech-state", text: "就绪" });
+
+    // 语速下拉：与按钮同一行，样式沿用 Obsidian 原生 select，协调且不占额外高度。
+    this.rateSelect = row.createEl("select", { cls: "kw-speech-rate" });
+    this.rateSelect.setAttr("aria-label", "朗读语速");
+    for (const option of SPEED_OPTIONS) {
+      const el = this.rateSelect.createEl("option", { value: String(option.value), text: option.label });
+      if (option.value === 1) el.setAttr("selected", "selected");
+    }
+    this.rateSelect.addEventListener("change", () => {
+      const rate = Number(this.rateSelect.value);
+      if (!Number.isFinite(rate)) return;
+      this.speech.setRate(rate);
+      this.onRateChange?.(rate);
+      this.hintEl.setText(`语速已设为 ${this.rateSelect.options[this.rateSelect.selectedIndex].text}。`);
+    });
+
     this.engineEl = row.createSpan({ cls: "kw-speech-engine", text: "" });
 
     this.slider = this.controls.createDiv({ cls: "kw-speech-slider" });
@@ -70,10 +101,12 @@ export class SpeechBar {
 
     this.hintEl = this.root.createDiv({ cls: "kw-speech-hint" });
     this.onExport = options.onExport;
+    this.onRateChange = options.onRateChange;
     this.fallbackEl = this.root.createDiv({ cls: "kw-speech-fallback" });
     this.fallbackEl.createDiv({
       cls: "kw-hint",
-      text: "Android 的 WebView 通常不提供 Web Speech；插件内的真人级云端语音已搁置。可把朗读稿复制到剪贴板或保存到库内，再用系统「随选朗读 / 选择即朗读」发声（系统神经音色通常比插件内系统语音更自然）。",
+      // U-6/P0-3：云端方案仍可用（设置页「安卓语音预设」），不再宣称"已搁置"。
+      text: "Android 的 WebView 通常不提供 Web Speech；可在设置页「安卓语音预设」配置云端神经语音。也可把朗读稿复制到剪贴板或保存到库内，再用系统「随选朗读 / 选择即朗读」发声。",
     });
     const fallbackRow = this.fallbackEl.createDiv({ cls: "kw-speech-row" });
     const copy = fallbackRow.createEl("button", {
@@ -115,10 +148,15 @@ export class SpeechBar {
   attach(path: string, title: string, markdown: string): void {
     if (this.disposed) return;
     this.speech.prepare(path, title, markdown);
-    if (this.autoPlay) this.speech.play(0);
-    else if (this.autoResume() && this.speech.getSnapshot().resumable) {
-      this.speech.play();
-    }
+    // 首选引擎可能需要异步准备：等它就绪再自动播放，
+    // 否则 play() 会因 !supported 直接报「设备不支持朗读」。
+    void this.speech.ensureReady().then(() => {
+      if (this.disposed) return;
+      if (this.autoPlay) this.speech.play(0);
+      else if (this.autoResume() && this.speech.getSnapshot().resumable) {
+        this.speech.play();
+      }
+    });
   }
 
   private render(state: SpeechSnapshot): void {
@@ -132,6 +170,8 @@ export class SpeechBar {
     this.countEl.setText(`${at} / ${state.total} 段`);
     this.stateEl.setText(STATE_TEXT[state.state]);
     this.stateEl.classList.toggle("is-playing", state.state === "playing");
+    // 语速可能被设置页（任意 0.5–3 自由值）改动，这里同步下拉选项与选中项。
+    this.syncRateOptions(state.rate);
 
     this.playBtn.setText(
       state.state === "paused"
@@ -161,6 +201,27 @@ export class SpeechBar {
       state.message || preview || "点「朗读」开始听这篇笔记；进度可拖动，关闭窗口会保存断点。",
     );
     this.hintEl.classList.toggle("kw-speech-error", !state.supported);
+  }
+
+  /** 语速可能被设置页设为 0.5–3 的任意值：非标准档时动态插入「当前 N×」临时项，避免下拉空白。 */
+  private syncRateOptions(rate: number): void {
+    this.rateSelect
+      .querySelectorAll("option[data-kw-dynamic]")
+      .forEach((el) => el.remove());
+    if (!SPEED_OPTIONS.some((option) => option.value === rate)) {
+      const dynamic = this.rateSelect.createEl("option", {
+        value: String(rate),
+        text: `当前 ${rate}×`,
+      });
+      dynamic.setAttr("data-kw-dynamic", "1");
+      const after = SPEED_OPTIONS.find((option) => option.value > rate);
+      const anchor = after
+        ? this.rateSelect.querySelector(`option[value="${after.value}"]`)
+        : null;
+      if (anchor) this.rateSelect.insertBefore(dynamic, anchor);
+      else this.rateSelect.appendChild(dynamic);
+    }
+    this.rateSelect.value = String(rate);
   }
 
   private paint(ratio: number): void {

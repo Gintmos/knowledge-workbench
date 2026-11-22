@@ -25,6 +25,10 @@ function nonEmptyString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
+function sameNumbers(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export function normalizeSettings(raw: unknown): WorkbenchSettings {
   const source = isRecord(raw) ? raw : {};
   // v1.0.6：原「过时阈值」改为「催办默认周期」。旧值恰为 90 视为未改过，迁移到 30。
@@ -33,11 +37,16 @@ export function normalizeSettings(raw: unknown): WorkbenchSettings {
     1,
     Math.floor(rawStale === 90 ? DEFAULT_SETTINGS.staleDays : rawStale),
   );
-  const intervals = Array.isArray(source["reviewIntervals"])
+  const storedIntervals = Array.isArray(source["reviewIntervals"])
     ? source["reviewIntervals"].filter(
         (item): item is number => typeof item === "number" && item > 0,
       )
     : [];
+  // 旧版固定间隔恰为未改过的默认值时，自动迁移到艾宾浩斯默认曲线；
+  // 用户自定义过间隔则原样保留。
+  const intervals = sameNumbers(storedIntervals, [1, 3, 7, 15, 30])
+    ? [...DEFAULT_SETTINGS.reviewIntervals]
+    : storedIntervals;
   const speechRate = Math.min(3, Math.max(0.5, finiteNumber(source["speechRate"], DEFAULT_SETTINGS.speechRate)));
   return {
     staleDays,
@@ -65,16 +74,27 @@ export function normalizeSettings(raw: unknown): WorkbenchSettings {
       1200,
       Math.max(0, Math.floor(finiteNumber(source["speechPauseMs"], DEFAULT_SETTINGS.speechPauseMs))),
     ),
+    // Piper 已移除：旧的 piper 值平滑迁移到系统语音，其余保持。
     speechEngine:
-      source["speechEngine"] === "piper" ? "piper" : DEFAULT_SETTINGS.speechEngine,
-    piperModelDir: nonEmptyString(source["piperModelDir"], DEFAULT_SETTINGS.piperModelDir),
-    piperVoiceId: nonEmptyString(source["piperVoiceId"], DEFAULT_SETTINGS.piperVoiceId),
+      source["speechEngine"] === "edge" || source["speechEngine"] === "cloud"
+        ? source["speechEngine"]
+        : DEFAULT_SETTINGS.speechEngine,
+    edgeVoiceId: nonEmptyString(source["edgeVoiceId"], DEFAULT_SETTINGS.edgeVoiceId),
+    // P1-1：Edge 接口版本覆盖值；旧配置无此字段时留空 = 使用插件内置版本。
+    // 合法性在引擎侧由 resolveGecVersion() 兜底，这里只保证类型安全，不改用户原值。
+    edgeGecVersion:
+      typeof source["edgeGecVersion"] === "string"
+        ? source["edgeGecVersion"]
+        : DEFAULT_SETTINGS.edgeGecVersion,
     taskAutoInfer:
       typeof source["taskAutoInfer"] === "boolean"
         ? source["taskAutoInfer"]
         : DEFAULT_SETTINGS.taskAutoInfer,
-    // v1.0.2：云端神经朗读已搁置，旧 data.json 里残留的开启状态一律强制关闭。
-    cloudTtsEnabled: false,
+    // 自定义 TTS 网关：尊重用户显式开启状态（默认仍为 false，不会偷偷联网）。
+    cloudTtsEnabled:
+      typeof source["cloudTtsEnabled"] === "boolean"
+        ? source["cloudTtsEnabled"]
+        : DEFAULT_SETTINGS.cloudTtsEnabled,
     cloudTtsUrl:
       typeof source["cloudTtsUrl"] === "string" ? source["cloudTtsUrl"] : DEFAULT_SETTINGS.cloudTtsUrl,
     cloudTtsKey:
@@ -139,7 +159,6 @@ export function normalizeData(raw: unknown): PluginData {
   const base = defaultData();
   if (!isRecord(raw)) return base;
   const view = isRecord(raw["view"]) ? raw["view"] : {};
-  const note = isRecord(view["note"]) ? view["note"] : null;
   const rawTab = view["tab"];
   // 旧「知识库」页签映射到「统计」；旧的坏死筛选值一并丢弃。
   const tab: WorkbenchTab =
@@ -160,16 +179,7 @@ export function normalizeData(raw: unknown): PluginData {
           : base.view.day,
       tab,
       scrollY: Math.max(0, finiteNumber(view["scrollY"], 0)),
-      lastModal: typeof view["lastModal"] === "string" ? view["lastModal"] : null,
-      note:
-        note && typeof note["path"] === "string"
-          ? {
-              path: note["path"],
-              title: typeof note["title"] === "string" ? note["title"] : note["path"],
-            }
-          : null,
       tabDetail,
-      mdView: typeof view["mdView"] === "boolean" ? view["mdView"] : false,
     },
     read: normalizeRead(raw["read"]),
     history: normalizeHistory(raw["history"]),
@@ -210,10 +220,5 @@ export function migratePaths(
       ? { ...item, path: newPath, title: newTitle ?? item.title }
       : item,
   );
-  const view = { ...data.view };
-  if (view.note?.path === oldPath) {
-    view.note = { path: newPath, title: newTitle ?? view.note.title };
-  }
-  if (view.lastModal === oldPath) view.lastModal = newPath;
-  return { ...data, read, history, view };
+  return { ...data, read, history };
 }

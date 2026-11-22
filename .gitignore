@@ -3,10 +3,10 @@ main.js
 main.js.map
 data.json
 test-vault/
-piper-test-vault/
 .tmp-tests/
 .tmp-bench/
 .tmp-ics/
 dist/
 *.log
 .DS_Store
+.tmp-ui-shots/

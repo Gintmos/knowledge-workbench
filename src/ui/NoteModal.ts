@@ -23,6 +23,11 @@ export interface NoteModalOptions {
   autoResume?: () => boolean;
   /** 把朗读稿保存到 vault，供 Android 系统朗读使用。 */
   onExport?: (title: string, text: string) => void;
+  /** 语速变化：持久化到设置，供下次朗读沿用。 */
+  onRateChange?: (rate: number) => void;
+  /** 复习闭环：两个回调都针对本弹窗的笔记，不依赖当前活动文件。 */
+  onStartReview?: () => void;
+  onStopReview?: () => void;
 }
 
 /**
@@ -38,6 +43,9 @@ export class NoteModal extends Modal {
   private readonly autoPlay: boolean;
   private readonly autoResume: (() => boolean) | undefined;
   private readonly onExport: ((title: string, text: string) => void) | undefined;
+  private readonly onRateChange: ((rate: number) => void) | undefined;
+  private readonly onStartReview: (() => void) | undefined;
+  private readonly onStopReview: (() => void) | undefined;
   private speechBar?: SpeechBar;
 
   constructor(app: App, file: TFile, options: NoteModalOptions = {}) {
@@ -47,6 +55,9 @@ export class NoteModal extends Modal {
     this.autoPlay = options.autoPlay ?? false;
     this.autoResume = options.autoResume;
     this.onExport = options.onExport;
+    this.onRateChange = options.onRateChange;
+    this.onStartReview = options.onStartReview;
+    this.onStopReview = options.onStopReview;
   }
 
   onOpen(): void {
@@ -61,6 +72,7 @@ export class NoteModal extends Modal {
         onExport: this.onExport
           ? (text) => this.onExport?.(this.file.basename, text)
           : undefined,
+        onRateChange: this.onRateChange,
       });
     }
     void this.renderBody();
@@ -75,6 +87,26 @@ export class NoteModal extends Modal {
 
   private async renderBody(): Promise<void> {
     const host = this.contentEl.createDiv({ cls: "kw-modal-scroll" });
+
+    // 复习闭环：朗读条下方只保留「开始复习 / 停止复习」两个纯文字入口。
+    // 按钮针对本弹窗的笔记，不依赖当前活动文件；回调由 plugin 提供，复用同一套写回。
+    if (this.onStartReview || this.onStopReview) {
+      const ops = host.createDiv({ cls: "kw-note-ops" });
+      ops.createSpan({ cls: "kw-note-ops-label", text: "复习：" });
+      const add = (text: string, run: () => void): void => {
+        const btn = ops.createEl("button", { cls: "kw-note-ops-btn", text });
+        btn.setAttr("type", "button");
+        btn.addEventListener("click", run);
+      };
+      if (this.onStartReview) {
+        const start = this.onStartReview;
+        add("开始复习", () => start());
+      }
+      if (this.onStopReview) {
+        const stop = this.onStopReview;
+        add("停止复习", () => stop());
+      }
+    }
 
     const actions = host.createDiv({ cls: "kw-modal-actions" });
     const open = actions.createEl("button", { text: "在 Obsidian 中打开" });
@@ -120,8 +152,18 @@ export class NoteModal extends Modal {
     if (!frontmatter) return;
     const keys = Object.keys(frontmatter).filter((key) => key !== "position");
     if (!keys.length) return;
-    parent.createDiv({ cls: "kw-modal-section-title", text: "属性" });
+
+    // U-9：Obsidian 已在正文顶部渲染属性，这里默认折叠，避免属性区与正文重复堆叠。
+    const head = parent.createDiv({ cls: "kw-fm-head" });
+    const toggle = head.createEl("button", {
+      cls: "kw-fold-btn kw-fm-toggle",
+      text: "笔记属性 ⌄",
+    });
+    toggle.setAttr("type", "button");
+    toggle.setAttr("aria-expanded", "false");
+
     const grid = parent.createDiv({ cls: "kw-fm-grid" });
+    grid.setAttr("hidden", "true");
     for (const key of keys) {
       const row = grid.createDiv({ cls: "kw-fm-row" });
       row.createSpan({ cls: "kw-fm-key", text: key });
@@ -130,6 +172,18 @@ export class NoteModal extends Modal {
         text: formatFrontmatter(frontmatter[key]),
       });
     }
+    toggle.addEventListener("click", () => {
+      const open = grid.hasAttribute("hidden");
+      if (open) grid.removeAttribute("hidden");
+      else grid.setAttr("hidden", "true");
+      toggle.setAttr("aria-expanded", String(open));
+      toggle.setText(open ? "笔记属性 ⌃" : "笔记属性 ⌄");
+    });
+
+    parent.createDiv({
+      cls: "kw-hint kw-fm-hint",
+      text: "此处与正文顶部的「属性」一致（插件读取的原始 frontmatter），默认折叠以减少重复扫读；点上方标题查看。",
+    });
   }
 
   private wireInternalLinks(root: HTMLElement): void {

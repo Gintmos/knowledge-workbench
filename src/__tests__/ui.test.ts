@@ -6,7 +6,6 @@ import {
   TAB_ORDER,
   barRowsMax,
   barWidthPercent,
-  filterPaths,
   groupToday,
   isTab,
   decodeSelection,
@@ -20,7 +19,6 @@ import {
 } from "../domain/uiModel";
 import { CHART_LIMIT, defaultData } from "../types";
 import type {
-  ChartSlice,
   HistoryEntry,
   NoteRecord,
   TodayItem,
@@ -66,14 +64,6 @@ function history(path: string, at: number): HistoryEntry {
 
 function view(patch: Partial<ViewState> = {}): ViewState {
   return { ...defaultData().view, ...patch };
-}
-
-function slices(counts: number[]): ChartSlice[] {
-  return counts.map((count, index) => ({
-    key: `分类${index}`,
-    count,
-    paths: Array.from({ length: count }, (_, i) => `分类${index}/${i}.md`),
-  }));
 }
 
 test("四个页签顺序固定：知识库已取消、浏览历史在最右", () => {
@@ -162,16 +152,12 @@ test("跨天重置视图，非法页签与负滚动位置有兜底", () => {
     day: "2026-11-14",
     tab: "bad-tab" as ViewState["tab"],
     scrollY: -50,
-    lastModal: "a.md",
-    note: { path: "a.md", title: "a" },
     tabDetail: { statsCategory: "category::项目" },
   });
   const reset = restoreViewState(raw, "2026-11-15");
   assert.equal(reset.day, "2026-11-15");
   assert.equal(reset.tab, "today");
   assert.equal(reset.scrollY, 0);
-  assert.equal(reset.lastModal, null);
-  assert.equal(reset.note, null);
   assert.deepEqual(reset.tabDetail, {});
 
   const sameDay = restoreViewState(raw, "2026-11-14");
@@ -194,13 +180,6 @@ test("分类筛选读写与清除", () => {
   assert.equal(decodeSelection("梦境"), null, "旧格式脏值不得恢复为选中项");
   assert.equal(decodeSelection(null), null);
   assert.deepEqual(normalizeTabDetail({ knowledgeCategory: "梦境", other: 1 }), { other: 1 });
-});
-
-test("filterPaths 不筛选时返回 null，未知分类返回空集合", () => {
-  const data = slices([2, 3]);
-  assert.equal(filterPaths(data, null), null);
-  assert.deepEqual([...filterPaths(data, "分类1")!], ["分类1/0.md", "分类1/1.md", "分类1/2.md"]);
-  assert.equal(filterPaths(data, "不存在")!.size, 0);
 });
 
 test("v1.0.2：今日页签与卡片标题统一为「今日」", () => {

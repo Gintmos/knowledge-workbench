@@ -2,6 +2,7 @@
  * 仅用于 Node 单测的内存版 Obsidian 宿主（由 run-tests.mjs 注入替换）。
  * 不参与插件构建，不引入任何外部依赖。
  */
+
 type Handler = (...args: unknown[]) => unknown;
 type EventRefLike = { name: string; callback: Handler };
 
@@ -150,4 +151,14 @@ export function addMockFile(
   app.vault.files.set(path, file);
   app.metadataCache.caches.set(path, cache);
   return file;
+}
+
+/**
+ * 宿主 requestUrl 的测试桩：cloud.ts 在单测里只被 import（覆盖其纯函数），
+ * 不应真正发起网络请求；若有用例误触发，立即抛错而不是静默联网。
+ */
+export async function requestUrl(
+  _request: unknown,
+): Promise<{ status: number; arrayBuffer: ArrayBuffer }> {
+  throw new Error("[obsidian-mock] requestUrl 不应在单测中发起网络请求");
 }

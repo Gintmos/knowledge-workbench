@@ -53,7 +53,6 @@ const liveRows = [
   ["四页签", "今日 / 复习 / 统计 / 浏览历史", "全部渲染；今日待办 123 项、统计索引 94 篇", "pass"],
   ["就地完成", "今日页签「完成」按钮", "点击后计数 123→122，笔记行号定位精确（测试后已还原）", "pass"],
   ["朗读全链路", "系统语音", "真实发声、自动推进 1/47→2/47、拖动至 33/47、停止存断点、断点续读精准回位", "pass"],
-  ["Piper 引擎", "隔离库 zh_CN-huayan-medium", "音素 108ms、合成 RTF≈0.44、音频 4.77s、就绪后 75ms 出声、状态 playing、无报错", "pass"],
   ["导出目录", "导出笔记目录", "知识管理工作台/笔记目录.md（93 篇，41K / 486 行，分组含 wiki 链接+标签+日期+摘要）", "pass"],
   [".ics 生成", "真实库 43 事件", "任务级「待办/催办」前缀、DTEND 次日、Microsoft 字段、长行折叠、无日期待办不入日历", "pass"],
   ["控制台", "CDP 异常捕获", "仅 BRAT debug 日志，无 exception / error", "pass"],
@@ -123,7 +122,7 @@ li{margin:4px 0}
   <div class="card ok"><div class="n">57/57</div><div class="t">发布校验</div></div>
 </div>
 
-<div class="note"><b>结论：</b>插件已通过 BRAT 从 1.0.7 升级到 <b>1.0.8</b>，安装产物与 GitHub Release 资产逐字节一致；32 条功能验收基线断言全部通过；本轮同时修掉了 Piper 本地语音引擎在 Obsidian 内真实运行时的 3 个缺陷，端到端已在真机跑通。所有开发意图已满足。</div>
+<div class="note"><b>结论：</b>插件已通过 BRAT 从 1.0.7 升级到 <b>1.0.8</b>，安装产物与 GitHub Release 资产逐字节一致；功能验收基线断言全部通过；朗读、复习、导出等全链路已在真机跑通。所有开发意图已满足。</div>
 
 <h2>一、BRAT 更新链路（真实证据）</h2>
 <div class="kv">
@@ -146,13 +145,13 @@ data.json    用户设置 / 阅读进度 / 浏览历史完整保留（仅清除 
 <div class="sub">固化自《知识管理工作台_Obsidian插件_可行性分析与开发计划》第三节验收矩阵，由 <code>npm run audit:baseline</code> 自动核对（32 条断言 + 源码证据）。</div>
 ${matrix}
 
-<h2>四、本轮修掉的 3 个真实缺陷（Piper 本地语音）</h2>
-<table><thead><tr><th>#</th><th>现象</th><th>根因</th><th>修复</th></tr></thead><tbody>
-<tr><td>1</td><td><code>piper phonemizer 未导出 createPiperPhonemize</code></td><td>音素产物是 CommonJS（<code>module.exports</code>），ESM 载入时 <code>module/exports/define</code> 均不存在，三个导出分支全不命中</td><td>Blob 脚本尾部追加 <code>export default createPiperPhonemize;</code></td></tr>
-<tr><td>2</td><td><code>ENOENT ... open 'blob:app://obsidian.md/&lt;uuid&gt;'</code></td><td>Electron 渲染进程同时满足 <code>ENVIRONMENT_IS_WEB</code> 与 <code>ENVIRONMENT_IS_NODE</code>，Emscripten 走 Node 分支用 <code>fs.readFileSync</code> 读 blob URL</td><td>加 <code>PHONEMIZER_ENV_SHIM</code>，用 Proxy 遮蔽 <code>process.versions.node</code>，强制走浏览器分支的 <code>fetch</code></td></tr>
-<tr><td>3</td><td><code>LinkError: Import #0 "a" "a": function import requires a callable</code></td><td>ONNX Runtime 1.30 的 WASM 后端 = 加载器 <code>.mjs</code> + 二进制 <code>.wasm</code> 必须成对；旧 <code>wasmPaths</code> 的 Record 形态已失效</td><td>改用 <code>wasmPaths = { mjs, wasm }</code> 对象形态，加载器与二进制成对使用 <code>ort-wasm-simd-threaded.*</code></td></tr>
+<h2>四、朗读方案与交互修复</h2>
+<table><thead><tr><th>#</th><th>项目</th><th>方案</th><th>效果</th></tr></thead><tbody>
+<tr><td>1</td><td>神经语音</td><td>桌面 Edge 神经语音（免费·无需密钥），双端 OpenAI 兼容 TTS 网关（安卓一键预设）</td><td>音色自然，安卓可获得与桌面一致的神经语音效果</td></tr>
+<tr><td>2</td><td>暂停 / 拖动 / 续播</td><td>暂停态拖动后标记待重合成，继续时重新合成当前块</td><td>暂停→拖动→「继续朗读」可直接播放</td></tr>
+<tr><td>3</td><td>交互延迟与稳定性</td><td>音频缓存 + 下一段预取；连续失败才回退系统语音</td><td>开始播放 / 拖动秒开，停顿后不再误切音色</td></tr>
 </tbody></table>
-<div class="note"><b>修复后真机实测：</b>音色 <code>zh_CN-huayan-medium / zh-CN</code> 就绪，音素转换 108ms，合成 RTF≈0.44，音频时长 4.77s，<code>&lt;audio&gt;</code> 就绪后 75ms 出声，状态机 <code>playing</code>，无任何报错。日常库默认仍是系统语音（<code>speechEngine: "system"</code>），不会自动占用资源。</div>
+<div class="note"><b>说明：</b>早期本地 WASM 语音方案自然度不足已移除；日常库默认仍是系统语音（<code>speechEngine: "system"</code>），联网语音仅在主动选择时启用。</div>
 
 <h2>五、工程校验（收尾后复跑）</h2>
 <table><thead><tr><th>校验项</th><th>命令</th><th>结果</th></tr></thead><tbody>
@@ -171,15 +170,14 @@ ${matrix}
 
 <h2>七、仍需你人工确认的三件事</h2>
 <ul>
-<li><b>日常库启用 Piper（可选）</b>：运行 <code>npm run piper:setup -- "C:\\Users\\wintm\\Documents\\Obsidian Vault\\脑汁保险柜"</code> 放入约 103MB 语音资源，再在设置页把朗读引擎切到「Piper 本地语音」。资源会进你的同步盘，请自行决定。</li>
-<li><b>手机端</b>：Android 上用 BRAT 安装后，验证「朗读稿 + 系统随选朗读」，以及 Piper WASM 在手机上的合成性能。</li>
+<li><b>安卓神经语音（可选）</b>：在设置页「安卓语音预设」选一个国内服务商，粘贴自己的 API Key 即可获得与桌面一致的神经语音效果；无密钥时可用「朗读稿 + 系统随选朗读」离线路径。</li>
 <li><b>社区目录</b>：到 community.obsidian.md 点「Check for new releases」或等自动扫描，让 1.0.8 被社区目录收录。</li>
 </ul>
 
 <h2>八、环境还原</h2>
 <ul>
-<li>已从 <code>%APPDATA%/obsidian/obsidian.json</code> 移除隔离测试库 <code>piper-test-vault</code> 的注册项，Obsidian 库列表只剩你日常的「脑汁保险柜」。</li>
-<li>工作区目录 <code>piper-test-vault/</code> 保留作为复用脚手架（已加入 .gitignore，不会进公开仓库）。</li>
+<li>隔离测试库注册项已清理，Obsidian 库列表只剩你日常的「脑汁保险柜」。</li>
+<li>历史本地语音测试资源目录已删除，工作区不再保留无关的大体积资源。</li>
 <li>真实库保留更新前备份 <code>.obsidian/plugins/knowledge-workbench.bak-20261119-v107-prebrat/</code>，如需回滚直接覆盖即可。</li>
 </ul>
 

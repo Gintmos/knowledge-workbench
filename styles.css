@@ -130,7 +130,12 @@
   font-weight: 600;
 }
 
+/* U-2：任务行改为 flex，窄栏下控件与 meta 各自成行，避免信息与按钮堆叠。 */
 .kw-today-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--size-4-1, 4px) var(--size-4-2, 8px);
   padding: var(--size-4-2, 8px) 0;
   border-bottom: 1px solid var(--background-modifier-border);
 }
@@ -380,11 +385,33 @@
   margin-bottom: 4px;
 }
 
+/* U-9：属性区默认折叠，标题用与运行信息一致的折叠按钮样式。 */
+.kw-fm-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--size-4-1, 4px);
+}
+
+.kw-fm-toggle {
+  width: 100%;
+  text-align: left;
+  padding: 2px 0;
+  color: var(--text-muted);
+}
+
+.kw-fm-hint {
+  margin-top: var(--size-4-1, 4px);
+}
+
 .kw-fm-grid {
   display: grid;
   grid-template-columns: minmax(80px, auto) 1fr;
   gap: 2px var(--size-4-2, 8px);
   font-size: var(--font-ui-small);
+}
+
+.kw-fm-grid[hidden] {
+  display: none;
 }
 
 .kw-fm-row {
@@ -422,15 +449,17 @@
 }
 
 /* 设置页 (i) 折叠说明。 */
+/* U-8：(i) 说明按钮放大加粗，提升可发现性；关键说明已提升到常驻 setDesc。 */
 .kw-info-btn {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 1px solid var(--background-modifier-border);
   border-radius: 50%;
   background: var(--background-primary);
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  font-size: var(--font-ui-small);
+  font-weight: 700;
   font-style: normal;
   line-height: 1;
   cursor: pointer;
@@ -453,6 +482,56 @@
 
 .kw-info-panel[hidden] {
   display: none;
+}
+
+/* 原文窗口顶部复习操作条：开始复习 / 停止复习，纯文字无外框。 */
+.kw-note-ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-1, 4px);
+  padding: var(--size-4-2, 8px) 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.kw-note-ops-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.kw-note-ops-btn,
+.kw-ops-setting .setting-item-control button {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--text-accent);
+  padding: 2px 6px !important;
+  min-height: 0 !important;
+  height: auto !important;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.kw-note-ops-btn:hover,
+.kw-ops-setting .setting-item-control button:hover {
+  background: var(--background-modifier-hover) !important;
+  text-decoration: underline;
+}
+
+/* U-5：安卓预设下方的常驻网关就绪状态条；ready 时高亮为强调色。 */
+.kw-gateway-status {
+  margin: 0 0 var(--size-4-2, 8px);
+  padding: 6px 8px;
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.kw-gateway-status.is-ready {
+  color: var(--text-accent);
 }
 
 .kw-settings-feedback {
@@ -514,6 +593,19 @@
   cursor: default;
 }
 
+/* 朗读窗口语速下拉：与按钮同高、同圆角，视觉统一且窄屏不溢出。 */
+.kw-speech-rate {
+  padding: 3px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-normal);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+  max-width: 110px;
+  cursor: pointer;
+}
+
 .kw-speech-count,
 .kw-speech-state {
   color: var(--text-muted);
@@ -524,10 +616,12 @@
   color: var(--text-accent);
 }
 
+/* U-1：引擎标签恒占独立一行，消除标准宽度下脱离控件行、被进度条挤压的割裂感。 */
 .kw-speech-engine {
+  flex: 1 0 100%;
+  margin-left: 0;
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
-  margin-left: auto;
 }
 
 .kw-speech-fallback {
@@ -643,21 +737,25 @@
     font-size: var(--font-ui-smaller);
   }
 
+  .kw-speech-rate {
+    padding: 3px 4px;
+    font-size: var(--font-ui-smaller);
+    max-width: 92px;
+  }
+
   .kw-speech-count,
   .kw-speech-state {
     font-size: var(--font-ui-smaller);
   }
 
-  .kw-speech-engine {
-    flex: 1 0 100%;
-    margin-left: 0;
-  }
+  /* U-1：引擎标签独立成行已上提到基础规则，窄屏无需重复覆盖。 */
 }
 
 /* ── v1.0.6：就地完成按钮 / 运行信息折叠 / 催办待办标识 ── */
+/* U-2：完成按钮改为 flex 布局（margin-left:auto 靠右），替代 float:right。 */
 .kw-resolve-btn {
-  float: right;
-  margin-left: var(--size-4-2, 8px);
+  margin-left: auto;
+  flex: 0 0 auto;
   padding: 2px 8px;
   font-size: var(--font-ui-smaller);
   border: 1px solid var(--background-modifier-border);
@@ -671,10 +769,22 @@
   background: var(--interactive-hover);
 }
 
-.kw-today-row::after {
-  content: "";
-  display: table;
-  clear: both;
+/* U-2：今日行的 meta 独占一行，避免与标题/按钮挤在同一行被截断。 */
+.kw-today-row > .kw-note-meta {
+  flex: 1 0 100%;
+  margin-top: 0;
+}
+
+/* U-7：导航类按钮（返回分类列表）用次级视觉权重，与「预览」区分。 */
+.kw-open-btn.kw-nav-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.kw-open-btn.kw-nav-btn:hover {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
 }
 
 .kw-runtime-info {
@@ -682,6 +792,10 @@
 }
 
 .kw-runtime-toggle {
+  /* 与上下两行统计卡片同宽（两列 + 8px 间距），只改宽度不改高度。 */
+  width: calc((100% - var(--size-4-2, 8px)) / 2);
+  box-sizing: border-box;
+  text-align: center;
   padding: 2px 0;
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);

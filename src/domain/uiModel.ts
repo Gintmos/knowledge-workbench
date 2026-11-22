@@ -1,6 +1,5 @@
 import {
   HISTORY_LIMIT,
-  type ChartSlice,
   type HistoryEntry,
   type TodayItem,
   type TodayKind,
@@ -86,8 +85,6 @@ export function restoreViewState(view: ViewState, today: string): ViewState {
     day: today,
     tab: "today",
     scrollY: 0,
-    lastModal: null,
-    note: null,
     tabDetail: {},
   };
 }
@@ -137,16 +134,6 @@ export function writeCategory(
   if (key) next[CATEGORY_KEY] = key;
   else delete next[CATEGORY_KEY];
   return next;
-}
-
-/** 按分类筛选笔记路径；空筛选返回 null 表示「不过滤」。 */
-export function filterPaths(
-  slices: ChartSlice[],
-  key: string | null,
-): Set<string> | null {
-  if (!key) return null;
-  const slice = slices.find((item) => item.key === key);
-  return new Set(slice?.paths ?? []);
 }
 
 /**

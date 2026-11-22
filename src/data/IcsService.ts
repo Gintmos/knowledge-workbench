@@ -26,7 +26,7 @@ export class IcsService {
   private day = "";
   private state: IcsState;
   private lastText = "";
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: number | null = null;
   private disposed = false;
 
   constructor(app: App, options: IcsServiceOptions) {
@@ -68,7 +68,7 @@ export class IcsService {
   schedule(): void {
     if (this.disposed || !this.state.enabled) return;
     this.clearTimer();
-    this.timer = globalThis.setTimeout(() => {
+    this.timer = window.setTimeout(() => {
       this.timer = null;
       void this.rebuild();
     }, this.options.writeDelay ?? 2000);
@@ -120,7 +120,7 @@ export class IcsService {
 
   private clearTimer(): void {
     if (this.timer !== null) {
-      globalThis.clearTimeout(this.timer);
+      window.clearTimeout(this.timer);
       this.timer = null;
     }
   }

@@ -22,13 +22,13 @@ export interface BatchScanResult<R> {
 /** 浏览器与手机端都可用的让出方式（不依赖 requestIdleCallback）。 */
 export function defaultYield(): Promise<void> {
   return new Promise<void>((resolve) => {
-    globalThis.setTimeout(resolve, 0);
+    window.setTimeout(resolve, 0);
   });
 }
 
 function now(): number {
-  return typeof globalThis.performance?.now === "function"
-    ? globalThis.performance.now()
+  return typeof window.performance?.now === "function"
+    ? window.performance.now()
     : Date.now();
 }
 

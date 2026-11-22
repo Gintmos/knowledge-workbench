@@ -35,13 +35,14 @@ export interface ViewState {
   day: string;
   tab: WorkbenchTab;
   scrollY: number;
-  lastModal: string | null;
-  note: { path: string; title: string } | null;
   tabDetail: Record<string, unknown>;
-  mdView: boolean;
 }
 
 export interface WorkbenchSettings {
+  /**
+   * 复审 V2 · P1-2：原「催办默认周期」设置无任何消费者且误导用户，1.0.10 起已从设置页移除。
+   * 字段仅为旧 data.json 兼容保留（normalizeSettings 继续清洗脏值），不再有业务消费者。
+   */
   staleDays: number;
   reviewIntervals: number[];
   icsPath: string;
@@ -56,15 +57,24 @@ export interface WorkbenchSettings {
   speechVoiceName: string;
   /** 块间停顿上限（毫秒）；0 表示关闭，生产默认 420。 */
   speechPauseMs: number;
-  /** 1.0.7：朗读引擎。system=系统语音；piper=库内 Piper WASM 本地模型。 */
-  speechEngine: "system" | "piper";
-  /** 1.0.7：Piper 模型与运行时文件所在库内目录。 */
-  piperModelDir: string;
-  /** 1.0.7：Piper 音色 ID；当前仅提供 zh_CN-huayan-medium。 */
-  piperVoiceId: string;
+  /**
+   * 朗读引擎。system=系统语音（离线兜底）；
+   * edge=微软 Edge 神经语音（桌面联网·免费·自然度最佳）；cloud=自定义 OpenAI 兼容 TTS 网关（双端）。
+   * edge / cloud 是本插件仅有的两个联网选项，其余功能保持零网络。
+   * 注：原 Piper 本地语音因自然度不足已移除，旧的 piper 值会自动归一到 system。
+   */
+  speechEngine: "system" | "edge" | "cloud";
+  /** Edge 神经语音音色 ShortName；空串表示用默认 zh-CN-XiaoxiaoNeural。 */
+  edgeVoiceId: string;
+  /**
+   * P1-1：Edge DRM v2 的 Sec-MS-GEC-Version 覆盖值，留空表示用插件内置版本。
+   * 微软升级接口导致 403 时，用户可填最新 Chromium 完整版本号热修，无需等发版。
+   * 例：143.0.3650.75 或 2-143.0.3650.75；非法值由 resolveGecVersion() 回退内置版本。
+   */
+  edgeGecVersion: string;
   /** v1.0.6：是否根据任务描述中的中文周期词推断下次到期（默认开）。 */
   taskAutoInfer: boolean;
-  /** v1.0.2 起云端神经 TTS 已搁置：仅保留字段兼容旧 data.json，运行时不接线。 */
+  /** 自定义 OpenAI 兼容 TTS 网关（可选联网方案，双端可用）；需用户自填地址与密钥。 */
   cloudTtsEnabled: boolean;
   cloudTtsUrl: string;
   cloudTtsKey: string;
@@ -238,9 +248,10 @@ export interface DomainSnapshot {
 }
 
 export const DEFAULT_SETTINGS: WorkbenchSettings = {
-  /** v1.0.6：原过时阈值 90 改为催办默认周期 30 天。 */
+  /** 已废弃（复审 V2 · P1-2）：仅为旧 data.json 归一化兼容保留，无消费者。 */
   staleDays: 30,
-  reviewIntervals: [1, 3, 7, 15, 30],
+  // 艾宾浩斯记忆曲线按天离散化：1/2/4/7/15/30/60 天。
+  reviewIntervals: [1, 2, 4, 7, 15, 30, 60],
   icsPath: "知识管理工作台/提醒.ics",
   indexPath: INDEX_PATH_DEFAULT,
   speechRate: 1,
@@ -250,8 +261,8 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
   speechVoiceName: "",
   speechPauseMs: 420,
   speechEngine: "system",
-  piperModelDir: "知识管理工作台/tts",
-  piperVoiceId: "zh_CN-huayan-medium",
+  edgeVoiceId: "zh-CN-XiaoxiaoNeural",
+  edgeGecVersion: "",
   taskAutoInfer: true,
   cloudTtsEnabled: false,
   cloudTtsUrl: "",
@@ -272,10 +283,7 @@ export function defaultData(): PluginData {
       day: new Date().toISOString().slice(0, 10),
       tab: "today",
       scrollY: 0,
-      lastModal: null,
-      note: null,
       tabDetail: {},
-      mdView: false,
     },
     read: {},
     history: [],

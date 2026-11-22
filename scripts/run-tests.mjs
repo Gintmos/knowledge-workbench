@@ -36,6 +36,12 @@ try {
     outdir: outDir,
     external: ["node:*"],
     plugins: [mockObsidian],
+    // P2-6：源码统一使用宿主 window.* 定时器（社区 prefer-window-timers 规则）。
+    // Node 单测没有 window，这里仅在测试产物里注入指向 globalThis 的宿主桩，
+    // 行为与浏览器一致；插件产物 main.js 不含该桩，也不引入任何运行时依赖。
+    banner: {
+      js: 'if (typeof globalThis.window === "undefined") { globalThis.window = globalThis; }',
+    },
     logLevel: "warning",
   });
 

@@ -99,21 +99,18 @@ export function collectReview(notes: NoteRecord[], today: string): TodayItem[] {
     const review = normalizeDate(note.review);
     if (!review || review > today) continue;
     const days = daysBetween(review, today);
+    const round = Math.max(0, note.reviewStage ?? 0) + 1;
+    const overdue = days > 0 ? `，已逾期 ${days} 天` : "";
     items.push({
       path: note.path,
       title: note.title,
       kind: "review",
       date: review,
       days,
-      detail: days > 0 ? `复习已到期 ${days} 天（${review}）` : `复习到期（${review}）`,
+      detail: `艾宾浩斯第 ${round} 轮 · 到期 ${review}${overdue}`,
     });
   }
   return items;
-}
-
-/** updated 优先，缺省回退到 file.stat.mtime 对应的本地日期（taskParse 锚点备用）。 */
-export function staleBaseDate(note: NoteRecord): string {
-  return normalizeDate(note.updated) ?? dateFromTimestamp(note.mtime);
 }
 
 const SOURCE_LABEL: Record<string, string> = {
